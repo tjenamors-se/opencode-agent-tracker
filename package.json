@@ -1,0 +1,55 @@
+{
+  "name": "@the-commits/opencode-agent-tracker",
+  "version": "0.0.0-alpha-dev",
+  "description": "High-performance agent tracking for OpenCode using LMDB",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "clean": "rm -rf dist coverage",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "lmdb": "^4.0.1"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "agent",
+    "tracking",
+    "lmdb",
+    "xp",
+    "skill-points"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/the-commits/opencode-agent-tracker"
+  }
+}
