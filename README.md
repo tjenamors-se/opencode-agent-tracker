@@ -20,6 +20,46 @@ npm install @tjenamors.se/opencode-agent-tracker
 - **Git Hook Integration**: Real-time commit tracking with agent validation
 - **Graceful Degradation**: Continues working even when LMDB unavailable
 - **TypeScript Native**: Full type safety with comprehensive definitions
+- **🔒 .env Protection**: Blocks reading/writing of environment files
+- **📊 Communication Scoring**: Tracks collaboration quality (-1/+1/+2 grading)
+- **🔔 Smart Notifications**: Toast notifications for critical events
+
+## 🚀 Local Testing
+
+### Quick Setup
+```bash
+# Build plugin and create symlink
+npm run setup-local
+
+# Test functionality without OpenCode
+npm run test-local
+```
+
+### Manual Setup
+```bash
+# 1. Build the plugin
+npm run build
+
+# 2. Create symlink to OpenCode plugins directory
+ln -sf "$(pwd)/dist" ~/.config/opencode/plugins/agent-tracker
+
+# 3. Start OpenCode - plugin will auto-load
+```
+
+### Testing Commands
+```bash
+# Verify TypeScript compilation
+npm run typecheck
+
+# Run unit tests
+npm test
+
+# Test coverage
+npm run test:coverage
+
+# Manual plugin test
+npm run test-local
+```
 
 ## 🏗️ Development Status
 

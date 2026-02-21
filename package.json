@@ -21,7 +21,9 @@
     "test:watch": "jest --watch --config jest.config.cjs",
     "test:coverage": "jest --coverage --config jest.config.cjs",
     "clean": "rm -rf dist coverage",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "setup-local": "node scripts/setup-local-teste.js",
+    "test-local": "node test-local-setup.mjs"
   },
   "dependencies": {
     "lmdb": "^3.5.1"
