@@ -1,5 +1,4 @@
 module.exports = {
-  preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['\u003crootDir\u003e/src', '\u003crootDir\u003e/tests'],
   testMatch: ['**/tests/**/*.test.ts'],
@@ -19,12 +18,8 @@ module.exports = {
   reporters: ['default'],
   moduleNameMapper: {'^(.+)\\.js$': '$1'},
   transform: {
-    '^.+\\.tsx?$': 'ts-jest'
-  },
-  extensionsToTreatAsEsm: ['.ts'],
-  globals: {
-    'ts-jest': {
+    '^.+\\\\.tsx?$': ['ts-jest', {
       useESM: true
-    }
+    }]
   }
 };

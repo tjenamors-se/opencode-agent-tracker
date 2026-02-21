@@ -1,12 +1,11 @@
 import type { Plugin } from '@opencode-ai/plugin'
-import type { PluginConfig } from './types.js'
 import { LMDBDatabase } from './lmdb-database.js'
 import { TrackingService } from './tracking-service.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 
 export const AgentTrackerPlugin: Plugin = async (context: any) => {
-  const { project, client, directory, worktree } = context
+  const { project, client, directory } = context
   // Initialize database
   const db = new LMDBDatabase()
   
@@ -35,7 +34,9 @@ export const AgentTrackerPlugin: Plugin = async (context: any) => {
 
   return {
     // Environment protection hooks
-    'tool.execute.before': envProtection.handleToolBefore.bind(envProtection),
+    'tool.execute.before': async (input) => {
+      await envProtection.handleToolBefore(input)
+    },
     
     // Tracking hooks
     'tool.execute.after': async (input: any, output: any) => {

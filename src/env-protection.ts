@@ -1,6 +1,6 @@
 export class EnvProtection {
   
-  async handleToolBefore(input: any, output: any): Promise<void> {
+  async handleToolBefore(input: any): Promise<void> {
     const { tool, args } = input
     
     // Protect against .env file operations
@@ -28,7 +28,7 @@ export class EnvProtection {
       /\.env\.test$/i,
       /\.env\.example$/i,
       /\.env\.sample$/i,
-      /\.env\.[^\.]+$/i
+      /\.env\.[^.]\+$/i
     ]
 
     return envPatterns.some(pattern => pattern.test(filePath))

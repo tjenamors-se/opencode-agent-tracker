@@ -8,12 +8,12 @@ interface ToolUsageEvent {
   timestamp: Date
 }
 
-interface SessionData {
-  id: string
-  agentIds: string[]
-  startTime: Date
-  endTime?: Date
-}
+// interface SessionData {
+//   id: string
+//   agentIds: string[]
+//   startTime: Date
+//   endTime?: Date
+// }
 
 export class TrackingService {
   constructor(
