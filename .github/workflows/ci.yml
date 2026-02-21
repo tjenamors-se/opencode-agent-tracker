@@ -16,7 +16,7 @@ jobs:
         cache: 'npm'
     
     - name: Install dependencies
-      run: npm ci
+      run: npm install
     
     - name: Type check
       run: npm run typecheck
@@ -33,29 +33,34 @@ jobs:
     - name: Build
       run: npm run build
 
-  publish-alpha:
-    if: github.ref == 'refs/heads/main'
-    needs: test
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        registry-url: 'https://registry.npmjs.org'
-    
-    - name: Install dependencies
-      run: npm ci
-    
-    - name: Build
-      run: npm run build
-    
-    - name: Publish alpha version
-      run: |
-        npm version 0.0.0-alpha-${GITHUB_SHA:0:8}
-        npm publish --tag alpha
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+# TODO: Enable when NPM_TOKEN secret is configured
+#  publish-alpha:
+#    if: github.ref == 'refs/heads/main'
+#    needs: test
+#    runs-on: ubuntu-latest
+#    
+#    steps:
+#    - uses: actions/checkout@v4
+#    - name: Configure git user
+#      run: |
+#        git config --global user.email "actions@github.com"
+#        git config --global user.name "GitHub Actions"
+#    
+#    - name: Setup Node.js
+#      uses: actions/setup-node@v4
+#      with:
+#        node-version: '20'
+#        registry-url: 'https://registry.npmjs.org'
+#    
+#    - name: Install dependencies
+#      run: npm ci
+#    
+#    - name: Build
+#      run: npm run build
+#    
+#    - name: Publish alpha version
+#      run: |
+#        npm version 0.0.0-alpha-${GITHUB_SHA:0:8}
+#        npm publish --tag alpha
+#      env:
+#        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

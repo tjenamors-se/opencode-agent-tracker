@@ -49,7 +49,6 @@ tmp/
 .tscache/
 
 # Package manager files
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 bun.lockb
