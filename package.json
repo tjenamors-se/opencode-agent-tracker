@@ -17,23 +17,24 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/**/*.ts",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
+    "test": "jest --config jest.config.cjs",
+    "test:watch": "jest --watch --config jest.config.cjs",
+    "test:coverage": "jest --coverage --config jest.config.cjs",
     "clean": "rm -rf dist coverage",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "lmdb": "^4.0.1"
+    "lmdb": "^3.5.1"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/plugin": "^1.2.10",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
     "jest": "^29.0.0",
     "ts-jest": "^29.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   },
   "engines": {

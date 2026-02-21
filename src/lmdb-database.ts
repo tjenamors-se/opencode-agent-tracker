@@ -12,9 +12,8 @@ export class LMDBDatabase {
   private initialize(): boolean {
     try {
       this.db = open({
-        path: this.databasePath,
-        compression: true,
-        cacheSize: '2GB'
+      path: this.databasePath,
+      compression: true
       })
       return true
     } catch (error) {
@@ -91,13 +90,17 @@ export class LMDBDatabase {
     
     try {
       const events: CommunicationScoreEvent[] = []
-      await this.db!.getRange({ start: 'communication:', end: 'communication:~' })
-        .forEach(({ value }) => {
-          if (value.agent_id === agentId) {
-            events.push(value)
-            if (events.length >= limit) return true // Stop iterating
+      const iterator = this.db!.getRange({ start: 'communication:', end: 'communication:~' })
+      
+      for (const { value } of iterator) {
+        if (value?.agent_id === agentId) {
+          events.push(value)
+          if (events.length >= limit) {
+            break
           }
-        })
+        }
+      }
+      
       return events
     } catch (error) {
       console.error('Failed to get communication events:', error)

@@ -1,7 +1,7 @@
-export default {
+module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
+  roots: ['\u003crootDir\u003e/src', '\u003crootDir\u003e/tests'],
   testMatch: ['**/tests/**/*.test.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
@@ -16,8 +16,15 @@ export default {
       statements: 80
     }
   },
-  reporters: [
-    'default',
-    ['jest-junit', { outputDirectory: 'coverage', outputName: 'junit.xml' }]
-  ]
+  reporters: ['default'],
+  moduleNameMapper: {'^(.+)\\.js$': '$1'},
+  transform: {
+    '^.+\\.tsx?$': 'ts-jest'
+  },
+  extensionsToTreatAsEsm: ['.ts'],
+  globals: {
+    'ts-jest': {
+      useESM: true
+    }
+  }
 };

@@ -5,7 +5,8 @@ import { TrackingService } from './tracking-service.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 
-export const AgentTrackerPlugin: Plugin = async ({ project, client, $, directory, worktree }) => {
+export const AgentTrackerPlugin: Plugin = async (context: any) => {
+  const { project, client, directory, worktree } = context
   // Initialize database
   const db = new LMDBDatabase()
   
@@ -37,33 +38,33 @@ export const AgentTrackerPlugin: Plugin = async ({ project, client, $, directory
     'tool.execute.before': envProtection.handleToolBefore.bind(envProtection),
     
     // Tracking hooks
-    'tool.execute.after': async (input, output) => {
+    'tool.execute.after': async (input: any, output: any) => {
       if (output.success) {
         await trackingService.trackToolUsage(input, output)
       }
     },
     
-    'command.executed': async (event) => {
+    'command.executed': async (event: any) => {
       if (event.success) {
         await trackingService.trackCommandCompletion(event)
       }
     },
     
-    'session.created': async (session) => {
+    'session.created': async (session: any) => {
       await dependencyChecker.validate()
       await trackingService.initializeSessionTracking(session)
     },
     
-    'session.idle': async (session) => {
+    'session.idle': async (session: any) => {
       await trackingService.generateRetrospective(session)
     },
     
-    'session.deleted': async (session) => {
+    'session.deleted': async (session: any) => {
       await trackingService.finalizeSession(session)
     },
 
     // Event handler for notifications
-    event: async ({ event }) => {
+    event: async ({ event }: { event: any }) => {
       // Show notification when LMDB is unavailable
       if (event.type === 'session.created' && !db.isAvailable) {
         await client.tui.toast.show({

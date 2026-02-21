@@ -1,4 +1,4 @@
-import { EnvProtection } from '../../src/env-protection.js'
+import { EnvProtection } from '../../src/env-protection'
 
 describe('EnvProtection', () => {
   let envProtection: EnvProtection

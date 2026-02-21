@@ -117,7 +117,7 @@ export class TrackingService {
     if (!agentId) return
 
     // Generate mini-retrospective
-    await client.app.log({
+    await this.client.app.log({
       body: {
         service: 'agent-tracker',
         level: 'info',
@@ -151,7 +151,7 @@ export class TrackingService {
       agent.skill_points += 1
       agent.experience_points = 0
       
-      await client.tui.toast.show({
+      await this.client.tui.toast.show({
         message: `Agent ${agentId} leveled up to SP ${agent.skill_points}!`,
         variant: 'success'
       })
