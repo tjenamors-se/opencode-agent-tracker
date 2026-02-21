@@ -180,6 +180,45 @@ src/
 - **Event names**: Use OpenCode standard event names
 - **Configuration**: Centralize all config in `config.ts`
 
+## Version Synchronization
+
+### Git Tag Strategy
+The package.json version should always match the latest git tag:
+
+```bash
+# Check current git tags
+git tag -l
+
+# Create new version tag
+git tag v$(npm pkg get version | tr -d '"')
+
+git push origin --tags
+```
+
+### Version Bump Commands
+Use semantic versioning with npm for consistency:
+
+```bash
+# Bump patch version (bug fixes)
+npm version patch
+
+# Bump minor version (new features)
+npm version minor
+
+# Bump major version (breaking changes)
+npm version major
+
+# Alpha releases for development
+npm version 0.0.0-alpha-$(git rev-parse --short HEAD)
+```
+
+### Pre-release Verification
+Before each release version:
+- [ ] Update package.json version
+- [ ] Create matching git tag
+- [ ] Push tags to remote
+- [ ] Verify GitHub Actions CI passes
+
 ## Commit Guidelines
 
 ### Commit Message Format
