@@ -2,7 +2,7 @@
 
 ## 📋 Project Overview
 
-**Package Name**: `@the-commits/opencode-agent-tracker`  
+**Package Name**: `@tjenamors.se/opencode-agent-tracker`  
 **License**: GPL-3.0-or-later  
 **Language**: TypeScript (strict mode)  
 **Target**: High-performance agent tracking for OpenCode using LMDB  
@@ -90,7 +90,7 @@ interface Agent {
 ### Repository Structure
 
 ```
-@the-commits/opencode-agent-tracker/
+@tjenamors.se/opencode-agent-tracker/
 ├── .github/workflows/      # CI/CD pipelines
 ├── src/                   # TypeScript source
 ├── tests/                 # Comprehensive test suite
@@ -173,7 +173,7 @@ jobs:
 - [ ] Finalize TypeScript type definitions
 - [ ] Optimize performance and error handling
 - [ ] Prepare for public release
-- [ ] Publish as `@the-commits/opencode-agent-tracker`
+- [ ] Publish as `@tjenamors.se/opencode-agent-tracker`
 
 ### Phase 4: Public Release (Week 4)
 - [ ] Create GitHub repository with GPL license

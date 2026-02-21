@@ -11,7 +11,7 @@
 ### Setup Instructions
 ```bash
 # Clone repository
-git clone https://github.com/the-commits/opencode-agent-tracker.git
+git clone https://github.com/tjenamors/opencode-agent-tracker.git
 cd opencode-agent-tracker
 
 # Install dependencies

@@ -1,5 +1,5 @@
 {
-  "name": "@the-commits/opencode-agent-tracker",
+  "name": "@tjenamors.se/opencode-agent-tracker",
   "version": "0.0.0-alpha-dev",
   "description": "High-performance agent tracking for OpenCode using LMDB",
   "license": "GPL-3.0-or-later",
@@ -51,6 +51,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/the-commits/opencode-agent-tracker"
+    "url": "https://github.com/tjenamors/opencode-agent-tracker"
   }
 }

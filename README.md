@@ -1,4 +1,4 @@
-# @the-commits/opencode-agent-tracker
+# @tjenamors.se/opencode-agent-tracker
 
 ⚠️ **Development Repository** - Under active development
 
@@ -10,7 +10,7 @@ High-performance agent tracking for OpenCode using LMDB. This plugin replaces JS
 
 ```bash
 # Coming soon
-npm install @the-commits/opencode-agent-tracker
+npm install @tjenamors.se/opencode-agent-tracker
 ```
 
 ## 🎯 Features

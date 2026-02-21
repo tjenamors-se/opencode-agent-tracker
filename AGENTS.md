@@ -4,7 +4,7 @@ This file contains development guidelines for agentic coding assistants working 
 
 ## Project Overview
 
-**Package**: `@the-commits/opencode-agent-tracker`  
+**Package**: `@tjenamors.se/opencode-agent-tracker`  
 **Language**: TypeScript (strict mode)  
 **Framework**: OpenCode Plugin System  
 **Database**: LMDB (Lightning Memory-Mapped Database)  

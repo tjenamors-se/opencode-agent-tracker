@@ -1,7 +1,7 @@
 // Example: Basic Plugin Setup
 // This file demonstrates how to use the OpenCode Agent Tracker plugin
 
-import { AgentTrackerPlugin } from '@the-commits/opencode-agent-tracker'
+import { AgentTrackerPlugin } from '@tjenamors.se/opencode-agent-tracker'
 
 // Plugin configuration example
 const config = {
@@ -25,7 +25,7 @@ const config = {
 const opencodeConfig = {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "@the-commits/opencode-agent-tracker"
+    "@tjenamors.se/opencode-agent-tracker"
   ],
   "agent-tracker": {
     "databasePath": "~/.config/opencode/tracking.lmdb",
