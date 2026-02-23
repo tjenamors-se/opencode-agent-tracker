@@ -1,6 +1,6 @@
 import { open, RootDatabase, Database as LMDBStore } from 'lmdb'
 import { homedir } from 'os'
-import { join, isAbsolute } from 'path'
+import { join, isAbsolute, dirname } from 'path'
 import { mkdirSync } from 'fs'
 import type { Database } from './database.js'
 import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry } from './types.js'
@@ -66,7 +66,7 @@ export class LMDBDatabase implements Database {
       this.validateMapSize(config.maxSize)
 
       if (config.path !== ':memory:') {
-        mkdirSync(config.path, { recursive: true })
+        mkdirSync(dirname(config.path), { recursive: true })
       }
 
       this.root = open({

@@ -258,3 +258,49 @@ describe('LMDBDatabase', () => {
     });
   });
 });
+
+describe('LMDBDatabase filesystem path', () => {
+  const os = require('os');
+  const path = require('path');
+  const fs = require('fs');
+
+  it('should create parent directory and open LMDB as a file, not a directory', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lmdb-test-'));
+    const dbPath = path.join(tmpDir, 'nested', 'test.lmdb');
+
+    const fsDb = new LMDBDatabase(dbPath);
+    try {
+      expect(fsDb.isAvailable).toBe(true);
+
+      // Parent directory should exist
+      expect(fs.existsSync(path.join(tmpDir, 'nested'))).toBe(true);
+      expect(fs.statSync(path.join(tmpDir, 'nested')).isDirectory()).toBe(true);
+
+      // LMDB path should be a file, NOT a directory
+      expect(fs.existsSync(dbPath)).toBe(true);
+      expect(fs.statSync(dbPath).isDirectory()).toBe(false);
+
+      // Should be able to write and read data
+      const agentData = {
+        id: 'fs-test-agent',
+        name: 'FS Test',
+        model: 'test',
+        scope: 'test',
+        skill_points: 1,
+        experience_points: 0,
+        communication_score: 60,
+        total_commits: 0,
+        total_bugs: 0,
+        active: true,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+      await fsDb.putAgent('fs-test-agent', agentData);
+      const retrieved = await fsDb.getAgent('fs-test-agent');
+      expect(retrieved?.id).toBe('fs-test-agent');
+    } finally {
+      await fsDb.close();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
