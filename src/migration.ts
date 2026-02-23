@@ -61,7 +61,7 @@ export async function detectOldDatabase(
   const hasLmdb = existsSync(lmdbPath) && !statSync(lmdbPath).isDirectory()
 
   let alreadyMigrated = false
-  if (targetDb.isAvailable) {
+  if (targetDb && targetDb.isAvailable) {
     const record = await targetDb.getMigration(sourceDir)
     alreadyMigrated = record !== null
   }
@@ -86,6 +86,11 @@ export async function migrateFromProjectDatabase(
     entriesMigrated: 0,
     entriesSkipped: 0,
     errors: []
+  }
+
+  if (!targetDb) {
+    result.errors.push('Target database is undefined')
+    return result
   }
 
   if (!targetDb.isAvailable) {
