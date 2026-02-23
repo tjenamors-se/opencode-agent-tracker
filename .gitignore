@@ -64,3 +64,6 @@ bun.lockb
 
 # Yarn Integrity file
 .yarn-integrity
+# Agent tracking state (local-only, per-user)
+.agent/
+.journal/
