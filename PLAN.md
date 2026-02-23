@@ -341,3 +341,174 @@ Every milestone MUST pass before proceeding to the next:
 ---
 
 **Blueprint ready. Use `engineer-build` to begin implementation.**
+
+---
+
+# PLAN: NPM Postinstall Setup (R9)
+
+**Date**: 2026-02-23
+**Strategy**: B (Modular .mjs script) from BRAINSTORM.md R9
+
+---
+
+## System Architecture
+
+```
+npm install @tjenamors.se/opencode-agent-tracker
+  │
+  └── postinstall (scripts/postinstall.mjs)
+        │
+        ├── copyPlugin()          R9.1
+        │     src: <package>/dist/
+        │     dst: ~/.config/opencode/plugins/agent-tracker/
+        │     behavior: always overwrite
+        │
+        ├── installSkills()       R9.2
+        │     src: <package>/skills/
+        │     dst: ~/.config/opencode/skills/
+        │     behavior: skip if dir exists
+        │
+        ├── installAgents()       R9.3
+        │     src: <package>/agents/agents.json
+        │     dst: ~/.config/opencode/opencode.json (merge)
+        │     behavior: skip if agent key exists
+        │
+        ├── registerPlugin()      R9.4
+        │     dst: ~/.config/opencode/opencode.json (plugin array)
+        │     behavior: add if not present, remove stale file:// paths
+        │
+        └── installAgentsMd()     R9.5
+              src: <package>/agents/TRACK_AGENTS.md
+              dst: ~/.config/opencode/AGENTS.md
+              behavior: merge if exists, create if not
+```
+
+## Bundled Assets to Create
+
+### M11: Bundle skills into repo
+Copy the two skill files into the npm package source tree:
+- `skills/agile-spec-to-build/SKILL.md` (from `~/.config/opencode/skills/agile-spec-to-build/SKILL.md`)
+- `skills/structured-review/SKILL.md` (from `~/.config/opencode/skills/structured-review/SKILL.md`)
+
+**Verification**: Files exist in repo, git status clean.
+
+### M12: Bundle agent definitions
+Create `agents/agents.json` with the 4 agent definitions extracted from `~/.config/opencode/opencode.json`:
+```json
+{
+  "spec-agent": { ... },
+  "brainstorm": { ... },
+  "architect-plan": { ... },
+  "engineer-build": { ... }
+}
+```
+
+**Verification**: File is valid JSON, contains exactly 4 agents.
+
+### M13: Bundle TRACK_AGENTS.md
+Create `agents/TRACK_AGENTS.md` with the scoring system content. This is the agent tracking scoring system (SP/XP/CS mechanics) that gets installed as or merged into `~/.config/opencode/AGENTS.md`.
+
+Content includes:
+- Agent Definition section (name, model, language, framework, scope)
+- Skill Points (SP) system and trust tiers
+- Experience Points (XP) sources and exchange mechanics
+- Communication Score (CS) grades and behavioral tiers
+- CS -> XP exchange (fibonacci rates)
+- XP -> SP exchange thresholds
+- Post-retrospective flow
+- Mini-retrospective format
+- Work structure (sprints, epics, bug fixes)
+- Sentinel comment markers for merge detection
+
+**Verification**: File exists, contains sentinel markers.
+
+### M14: Write postinstall.mjs — copyPlugin()
+Function: Copy `dist/` to `~/.config/opencode/plugins/agent-tracker/`
+- Resolve paths with `os.homedir()` + `path.join()`
+- Create target dirs recursively (`fs.mkdirSync(..., { recursive: true })`)
+- Copy all files from package dist/ using `fs.cpSync()` (Node 18+) or manual recursive copy
+- Always overwrite (latest version)
+- Wrap in try/catch, log errors to stderr
+
+**Verification**: typecheck n/a (.mjs), lint n/a, manual test.
+
+### M15: Write postinstall.mjs — installSkills()
+Function: Copy skills to `~/.config/opencode/skills/`
+- For each skill dir in `<package>/skills/`:
+  - Check if `~/.config/opencode/skills/<skill-name>/` exists
+  - If exists: skip, print "[skip] skill <name> already exists"
+  - If not: create dir, copy SKILL.md, print "[install] skill <name>"
+- Wrap in try/catch per skill
+
+**Verification**: Manual test — run once (installs), run again (skips).
+
+### M16: Write postinstall.mjs — installAgents() + registerPlugin()
+Function: Merge agents and plugin into opencode.json
+- Read `~/.config/opencode/opencode.json` (create if not exists)
+- Parse JSON (fail gracefully on malformed)
+- For each agent in agents.json:
+  - If `config.agent[name]` exists: skip, print "[skip]"
+  - If not: add, print "[install]"
+- For plugin array:
+  - Remove any `file://` entries containing `opencode-agent-tracker`
+  - Add plugin path if not present
+- Write back with `JSON.stringify(config, null, 2)`
+
+**Verification**: Manual test — run with empty config, existing config, missing file.
+
+### M17: Write postinstall.mjs — installAgentsMd()
+Function: Create or merge AGENTS.md
+- Read `~/.config/opencode/AGENTS.md` if exists
+- If exists:
+  - Check for sentinel: `<!-- agent-tracker-scoring-start -->`
+  - If sentinel found: scoring section already present, skip
+  - If not found: append scoring section (wrapped in sentinels), print "[merge]"
+- If not exists:
+  - Copy TRACK_AGENTS.md content as AGENTS.md, print "[create]"
+- Wrap in try/catch
+
+**Verification**: Manual test — run with no AGENTS.md, with existing AGENTS.md, with already-merged AGENTS.md.
+
+### M18: Wire main() orchestrator + package.json
+- Wire all functions into `main()` in postinstall.mjs
+- Add CI/non-interactive detection (R9.6)
+- Add error handling wrapper (R9.7) — exit 0 always
+- Update package.json:
+  - `"files": ["dist", "skills", "agents", "scripts/postinstall.mjs"]`
+  - `"scripts": { "postinstall": "node scripts/postinstall.mjs" }`
+- Run existing test suite to ensure no regressions
+
+**Verification**: `npm run typecheck` + `npm run lint` + `npm test` all pass. Manual postinstall test.
+
+---
+
+## Milestone Summary
+
+| Milestone | Task | Files | Commit |
+|-----------|------|-------|--------|
+| M11 | Bundle skills into repo | skills/ | Small |
+| M12 | Bundle agent definitions | agents/agents.json | Small |
+| M13 | Bundle TRACK_AGENTS.md | agents/TRACK_AGENTS.md | Small |
+| M14 | postinstall.mjs — copyPlugin() | scripts/postinstall.mjs | Medium |
+| M15 | postinstall.mjs — installSkills() | scripts/postinstall.mjs | Medium |
+| M16 | postinstall.mjs — installAgents() + registerPlugin() | scripts/postinstall.mjs | Medium |
+| M17 | postinstall.mjs — installAgentsMd() | scripts/postinstall.mjs | Medium |
+| M18 | Wire main(), package.json, verify | scripts/postinstall.mjs, package.json | Medium |
+
+---
+
+## Dependency Tree
+
+```
+M11 ─┐
+M12 ─┼─> M14 ─> M15 ─> M16 ─> M17 ─> M18
+M13 ─┘
+```
+
+M11-M13 are independent asset bundling (can be done in parallel but will be committed sequentially for commit hygiene). M14-M17 are sequential (each function builds on the script). M18 wires everything together.
+
+---
+
+## Context Summary (Phase 3 Complete)
+
+Blueprint ready. 8 milestones (M11-M18) covering asset bundling and postinstall script construction. Strategy B chosen: modular .mjs with independent helper functions. Each milestone = one commit. Verification at every step.
