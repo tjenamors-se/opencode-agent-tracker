@@ -1,8 +1,8 @@
 import figlet from 'figlet'
 import type { AgentHealthStatus } from './types.js'
 
-const MAX_WIDTH = 60
-const BAR_WIDTH = 20
+const MAX_WIDTH = 80
+const BAR_WIDTH = 30
 
 /**
  * Maps SP value to trust tier label.
@@ -22,7 +22,7 @@ export function getTrustTier(sp: number): string {
 export function renderAgentName(name: string): string {
   try {
     const rendered = figlet.textSync(name, {
-      font: 'Cybermedium',
+      font: 'Cybersmall',
       width: MAX_WIDTH,
       whitespaceBreak: true,
     })
