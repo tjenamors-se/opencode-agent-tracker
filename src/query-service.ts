@@ -1,6 +1,8 @@
+import { execSync } from 'child_process'
 import type { Database } from './database.js'
-import type { PriorArtQuery, PriorArtResult, PatternMatch, Grade } from './types.js'
+import type { PriorArtQuery, PriorArtResult, PatternMatch, Grade, GitLogMatch, ProjectProfile } from './types.js'
 import { GRADE_LABELS } from './types.js'
+import { ProjectClassifier } from './project-classifier.js'
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
@@ -18,13 +20,19 @@ const STOP_WORDS = new Set([
   'why', 'you', 'your'
 ])
 
+const SIMILARITY_THRESHOLD = 0.3
+
 /**
  * Searches LMDB database for prior art relevant to a given task.
  * Uses keyword matching to find positive patterns, cross-scope patterns,
  * and mistakes from historical retrospectives, activities, and commits.
  */
 export class QueryService {
-  constructor(private db: Database) {}
+  private classifier: ProjectClassifier
+
+  constructor(private db: Database) {
+    this.classifier = new ProjectClassifier()
+  }
 
   /**
    * Extracts searchable keywords from text.
@@ -62,8 +70,9 @@ export class QueryService {
   /**
    * Searches the database for prior art matching the query.
    * Performs three searches: scope-local positives, cross-scope positives, mistakes.
+   * When projectPath is provided, also searches similar projects and falls back to git log.
    */
-  async searchPriorArt(query: PriorArtQuery): Promise<PriorArtResult> {
+  async searchPriorArt(query: PriorArtQuery, projectPath?: string): Promise<PriorArtResult> {
     const keywords = this.extractKeywords(query.taskDescription)
     const maxResults = query.maxResults ?? 5
     const minRelevance = 0.1
@@ -164,7 +173,66 @@ export class QueryService {
       .sort((a, b) => b.relevanceScore - a.relevanceScore)
       .slice(0, maxResults)
 
-    return { positivePatterns, crossScopePatterns, mistakes }
+    let result: PriorArtResult = { positivePatterns, crossScopePatterns, mistakes }
+
+    if (projectPath) {
+      result = await this.enrichWithCrossProjectData(result, projectPath, keywords, maxResults, minRelevance)
+    }
+
+    return result
+  }
+
+  /**
+   * Searches git logs across multiple project directories for matching commits.
+   * @param projectPaths - Array of project directory paths to search
+   * @param keywords - Keywords to match against commit messages
+   * @param limit - Maximum number of results to return
+   * @returns Array of matching git log entries scored by relevance
+   */
+  searchGitLog(projectPaths: string[], keywords: string[], limit: number): GitLogMatch[] {
+    if (keywords.length === 0 || projectPaths.length === 0) {
+      return []
+    }
+
+    const allMatches: GitLogMatch[] = []
+
+    for (const projectPath of projectPaths) {
+      try {
+        const output = execSync(`git -C "${projectPath}" log --oneline -n 200`, {
+          timeout: 5000,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe']
+        })
+
+        for (const line of output.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+
+          const spaceIndex = trimmed.indexOf(' ')
+          if (spaceIndex === -1) continue
+
+          const commitHash = trimmed.substring(0, spaceIndex)
+          const message = trimmed.substring(spaceIndex + 1)
+
+          const score = this.scoreEntry(keywords, [message])
+          if (score >= 0.1) {
+            allMatches.push({
+              projectPath,
+              commitHash,
+              message,
+              relevanceScore: score
+            })
+          }
+        }
+      } catch (_error) {
+        // Skip non-git dirs, missing dirs, timeouts
+        continue
+      }
+    }
+
+    return allMatches
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, limit)
   }
 
   /**
@@ -217,6 +285,94 @@ export class QueryService {
       lines.push(`  Notes: ${match.notes}`)
     }
     return lines.join('\n')
+  }
+
+  /**
+   * Enriches prior art results with data from similar projects.
+   * Falls back to git log search if DB yields no cross-project results.
+   */
+  private async enrichWithCrossProjectData(
+    result: PriorArtResult,
+    projectPath: string,
+    keywords: string[],
+    maxResults: number,
+    minRelevance: number
+  ): Promise<PriorArtResult> {
+    let currentProfile: ProjectProfile
+    try {
+      currentProfile = await this.classifier.classifyProject(projectPath)
+    } catch (_error) {
+      return result
+    }
+
+    const allProjects = await this.db.getAllProjects()
+    const similarPaths: string[] = []
+
+    for (const project of allProjects) {
+      if (project.path === projectPath) continue
+      const similarity = this.classifier.scoreSimilarity(currentProfile, project)
+      if (similarity >= SIMILARITY_THRESHOLD) {
+        similarPaths.push(project.path)
+      }
+    }
+
+    if (similarPaths.length === 0) {
+      return result
+    }
+
+    const crossProjectMatches: PatternMatch[] = []
+
+    const allCommits = await this.db.getAllCommits(1000)
+    const similarPathSet = new Set(similarPaths)
+
+    for (const commit of allCommits) {
+      if (!similarPathSet.has(commit.project_path)) continue
+      const score = this.scoreEntry(keywords, [commit.task_description])
+      if (score >= minRelevance) {
+        crossProjectMatches.push({
+          source: 'commit',
+          task: commit.task_description,
+          notes: `From project: ${commit.project_path}`,
+          agentId: commit.agent_id,
+          scope: 'cross-project',
+          timestamp: commit.timestamp instanceof Date ? commit.timestamp.toISOString() : String(commit.timestamp),
+          relevanceScore: score
+        })
+      }
+    }
+
+    if (crossProjectMatches.length > 0) {
+      const sorted = crossProjectMatches
+        .sort((a, b) => b.relevanceScore - a.relevanceScore)
+        .slice(0, maxResults)
+
+      return {
+        positivePatterns: result.positivePatterns,
+        crossScopePatterns: [...result.crossScopePatterns, ...sorted],
+        mistakes: result.mistakes
+      }
+    }
+
+    const gitMatches = this.searchGitLog(similarPaths, keywords, maxResults)
+    if (gitMatches.length > 0) {
+      const gitPatterns: PatternMatch[] = gitMatches.map(m => ({
+        source: 'commit' as const,
+        task: m.message,
+        notes: `Git log from: ${m.projectPath}`,
+        agentId: 'unknown',
+        scope: 'cross-project',
+        timestamp: new Date().toISOString(),
+        relevanceScore: m.relevanceScore
+      }))
+
+      return {
+        positivePatterns: result.positivePatterns,
+        crossScopePatterns: [...result.crossScopePatterns, ...gitPatterns],
+        mistakes: result.mistakes
+      }
+    }
+
+    return result
   }
 
   /**

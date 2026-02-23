@@ -1,6 +1,13 @@
 import { QueryService } from '../../src/query-service';
 import { MockDatabase } from '../../src/mock-database';
-import type { AgentData, RetrospectiveEntry, ActivityEntry, CommitData } from '../../src/types';
+import type { AgentData, RetrospectiveEntry, ActivityEntry, CommitData, ProjectProfile } from '../../src/types';
+import { execSync } from 'child_process';
+
+jest.mock('child_process', () => ({
+  execSync: jest.fn()
+}));
+
+const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
 
 describe('QueryService', () => {
   let db: MockDatabase;
@@ -9,6 +16,7 @@ describe('QueryService', () => {
   beforeEach(() => {
     db = new MockDatabase();
     service = new QueryService(db);
+    mockExecSync.mockReset();
   });
 
   const makeAgent = (id: string, scope: string): AgentData => ({
@@ -56,6 +64,18 @@ describe('QueryService', () => {
     experience_gained: 1,
     communication_score_change: 0,
     timestamp: new Date(),
+    ...overrides
+  });
+
+  const makeProject = (overrides: Partial<ProjectProfile> = {}): ProjectProfile => ({
+    path: '/project-a',
+    language: 'typescript',
+    framework: 'next',
+    scope: 'frontend',
+    dependencies: ['react', 'next', 'typescript'],
+    manifestType: 'package.json',
+    classifiedAt: '2026-02-23T18:00:00Z',
+    agentsmdHash: 'abc123',
     ...overrides
   });
 
@@ -354,6 +374,287 @@ describe('QueryService', () => {
         scope: 'backend'
       });
       expect(result.positivePatterns.length).toBe(0);
+    });
+
+    it('should work without projectPath (unchanged behavior)', async () => {
+      await db.putAgent('agent1', makeAgent('agent1', 'backend'));
+      await db.putRetrospective('agent1', 'c1', makeRetro({
+        commit: 'c1',
+        task: 'Database migration implementation',
+        agent_grade: 2,
+        user_grade: 2
+      }));
+
+      const result = await service.searchPriorArt({
+        taskDescription: 'implement database migration feature',
+        scope: 'backend'
+      });
+      expect(result.positivePatterns.length).toBe(1);
+      expect(mockExecSync).not.toHaveBeenCalled();
+    });
+
+    it('should find cross-project data from similar projects', async () => {
+      // Current project profile would classify as typescript/next
+      // Store a similar project in DB
+      await db.putProject('/similar-project', makeProject({
+        path: '/similar-project',
+        language: 'typescript',
+        framework: 'next',
+        scope: 'frontend'
+      }));
+
+      // Store a commit from the similar project
+      await db.putAgent('cross-agent', makeAgent('cross-agent', 'frontend'));
+      await db.putCommit('/similar-project', 'cross-hash', makeCommit({
+        agent_id: 'cross-agent',
+        project_path: '/similar-project',
+        task_description: 'Implement database migration pattern for users table'
+      }));
+
+      // Mock classifyProject to return a matching profile
+      const classifier = (service as any).classifier;
+      jest.spyOn(classifier, 'classifyProject').mockResolvedValue(makeProject({
+        path: '/current-project',
+        language: 'typescript',
+        framework: 'next',
+        scope: 'frontend'
+      }));
+
+      const result = await service.searchPriorArt(
+        { taskDescription: 'implement database migration feature', scope: 'backend' },
+        '/current-project'
+      );
+
+      expect(result.crossScopePatterns.length).toBeGreaterThan(0);
+      expect(result.crossScopePatterns.some(
+        p => p.notes?.includes('/similar-project')
+      )).toBe(true);
+    });
+
+    it('should fallback to git log when DB has no cross-project results', async () => {
+      // Store a similar project but no commits from it
+      await db.putProject('/similar-project', makeProject({
+        path: '/similar-project',
+        language: 'typescript',
+        framework: 'next',
+        scope: 'frontend'
+      }));
+
+      const classifier = (service as any).classifier;
+      jest.spyOn(classifier, 'classifyProject').mockResolvedValue(makeProject({
+        path: '/current-project',
+        language: 'typescript',
+        framework: 'next',
+        scope: 'frontend'
+      }));
+
+      mockExecSync.mockReturnValue(
+        'abc1234 feat: implement database migration\ndef5678 fix: database connection timeout\n'
+      );
+
+      const result = await service.searchPriorArt(
+        { taskDescription: 'implement database migration feature', scope: 'backend' },
+        '/current-project'
+      );
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        expect.stringContaining('/similar-project'),
+        expect.objectContaining({ timeout: 5000 })
+      );
+      expect(result.crossScopePatterns.length).toBeGreaterThan(0);
+      expect(result.crossScopePatterns.some(
+        p => p.notes?.includes('Git log')
+      )).toBe(true);
+    });
+
+    it('should not search cross-project when no similar projects exist', async () => {
+      // Store a dissimilar project
+      await db.putProject('/rust-project', makeProject({
+        path: '/rust-project',
+        language: 'rust',
+        framework: 'unknown',
+        scope: 'systems',
+        dependencies: []
+      }));
+
+      const classifier = (service as any).classifier;
+      jest.spyOn(classifier, 'classifyProject').mockResolvedValue(makeProject({
+        path: '/current-project',
+        language: 'typescript',
+        framework: 'next',
+        scope: 'frontend'
+      }));
+
+      const result = await service.searchPriorArt(
+        { taskDescription: 'implement database migration feature', scope: 'backend' },
+        '/current-project'
+      );
+
+      expect(mockExecSync).not.toHaveBeenCalled();
+      expect(result.crossScopePatterns).toEqual([]);
+    });
+  });
+
+  describe('searchGitLog', () => {
+    it('should parse git log output and score matches', () => {
+      mockExecSync.mockReturnValue(
+        'abc1234 feat: implement database migration\ndef5678 chore: update readme\nghi9012 fix: database connection pool\n'
+      );
+
+      const matches = service.searchGitLog(
+        ['/project-a'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBeGreaterThan(0);
+      expect(matches[0]!.commitHash).toBeDefined();
+      expect(matches[0]!.message).toBeDefined();
+      expect(matches[0]!.projectPath).toBe('/project-a');
+      expect(matches[0]!.relevanceScore).toBeGreaterThan(0);
+    });
+
+    it('should sort results by relevance descending', () => {
+      mockExecSync.mockReturnValue(
+        'abc1234 database migration feature\ndef5678 just database\nghi9012 unrelated change\n'
+      );
+
+      const matches = service.searchGitLog(
+        ['/project-a'],
+        ['database', 'migration', 'feature'],
+        10
+      );
+
+      for (let i = 1; i < matches.length; i++) {
+        expect(matches[i - 1]!.relevanceScore).toBeGreaterThanOrEqual(matches[i]!.relevanceScore);
+      }
+    });
+
+    it('should respect limit parameter', () => {
+      const lines = Array.from({ length: 50 }, (_, i) =>
+        `hash${i} database migration task number ${i}`
+      ).join('\n');
+      mockExecSync.mockReturnValue(lines);
+
+      const matches = service.searchGitLog(
+        ['/project-a'],
+        ['database', 'migration'],
+        5
+      );
+
+      expect(matches.length).toBeLessThanOrEqual(5);
+    });
+
+    it('should filter entries below relevance threshold', () => {
+      mockExecSync.mockReturnValue(
+        'abc1234 completely unrelated css button styling\n'
+      );
+
+      const matches = service.searchGitLog(
+        ['/project-a'],
+        ['database', 'migration', 'schema'],
+        10
+      );
+
+      expect(matches.length).toBe(0);
+    });
+
+    it('should handle errors gracefully (non-git dir)', () => {
+      mockExecSync.mockImplementation(() => {
+        throw new Error('fatal: not a git repository')
+      });
+
+      const matches = service.searchGitLog(
+        ['/not-a-git-dir'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(0);
+    });
+
+    it('should handle timeout errors', () => {
+      mockExecSync.mockImplementation(() => {
+        const err = new Error('Command timed out');
+        (err as any).killed = true;
+        throw err;
+      });
+
+      const matches = service.searchGitLog(
+        ['/slow-project'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(0);
+    });
+
+    it('should search multiple projects', () => {
+      mockExecSync
+        .mockReturnValueOnce('abc1234 database migration alpha\n')
+        .mockReturnValueOnce('def5678 database migration beta\n');
+
+      const matches = service.searchGitLog(
+        ['/project-a', '/project-b'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(2);
+      expect(matches.some(m => m.projectPath === '/project-a')).toBe(true);
+      expect(matches.some(m => m.projectPath === '/project-b')).toBe(true);
+    });
+
+    it('should skip failed projects and continue with others', () => {
+      mockExecSync
+        .mockImplementationOnce(() => { throw new Error('not a git repo') })
+        .mockReturnValueOnce('abc1234 database migration feature\n');
+
+      const matches = service.searchGitLog(
+        ['/bad-dir', '/good-project'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(1);
+      expect(matches[0]!.projectPath).toBe('/good-project');
+    });
+
+    it('should return empty for empty keywords', () => {
+      const matches = service.searchGitLog(['/project-a'], [], 10);
+      expect(matches.length).toBe(0);
+      expect(mockExecSync).not.toHaveBeenCalled();
+    });
+
+    it('should return empty for empty project paths', () => {
+      const matches = service.searchGitLog([], ['database'], 10);
+      expect(matches.length).toBe(0);
+      expect(mockExecSync).not.toHaveBeenCalled();
+    });
+
+    it('should skip lines with no space (hash-only lines)', () => {
+      mockExecSync.mockReturnValue('abc1234\ndef5678 database migration\n');
+
+      const matches = service.searchGitLog(
+        ['/project-a'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(1);
+      expect(matches[0]!.commitHash).toBe('def5678');
+    });
+
+    it('should handle empty git log output', () => {
+      mockExecSync.mockReturnValue('');
+
+      const matches = service.searchGitLog(
+        ['/empty-project'],
+        ['database', 'migration'],
+        10
+      );
+
+      expect(matches.length).toBe(0);
     });
   });
 
