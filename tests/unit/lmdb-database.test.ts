@@ -245,6 +245,116 @@ describe('LMDBDatabase', () => {
     });
   });
 
+  describe('getAllRetrospectives', () => {
+    const entry = {
+      commit: 'abc123',
+      timestamp: '2026-02-23T18:00:00Z',
+      task: 'Test task',
+      agent_grade: 2 as const,
+      user_grade: 2 as const,
+      score_before: 60,
+      score_after: 64,
+      agent_note: 'Good work',
+      user_note: ''
+    };
+
+    it('should return retrospectives from all agents with agent_id', async () => {
+      await db.putRetrospective('getall-retro-agent1', 'commit1', { ...entry, commit: 'commit1' });
+      await db.putRetrospective('getall-retro-agent2', 'commit2', { ...entry, commit: 'commit2' });
+      const all = await db.getAllRetrospectives();
+      const fromAgent1 = all.filter(e => e.agent_id === 'getall-retro-agent1');
+      const fromAgent2 = all.filter(e => e.agent_id === 'getall-retro-agent2');
+      expect(fromAgent1.length).toBeGreaterThanOrEqual(1);
+      expect(fromAgent2.length).toBeGreaterThanOrEqual(1);
+      expect(fromAgent1[0]?.commit).toBe('commit1');
+      expect(fromAgent2[0]?.commit).toBe('commit2');
+    });
+
+    it('should respect limit parameter', async () => {
+      await db.putRetrospective('getall-retro-limit1', 'c1', { ...entry, commit: 'c1' });
+      await db.putRetrospective('getall-retro-limit2', 'c2', { ...entry, commit: 'c2' });
+      await db.putRetrospective('getall-retro-limit3', 'c3', { ...entry, commit: 'c3' });
+      const limited = await db.getAllRetrospectives(2);
+      expect(limited.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should return empty array when unavailable', async () => {
+      await db.close();
+      const result = await db.getAllRetrospectives();
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('getAllActivities', () => {
+    const entry = {
+      timestamp: '2026-02-23T18:00:00Z',
+      task: 'Write specs',
+      actions: 'Analyzed codebase',
+      outcome: 'SPECS.md written',
+      decisions: 'Use spec-agent workflow'
+    };
+
+    it('should return activities from all agents with agent_id', async () => {
+      await db.putActivity('getall-act-agent1', { ...entry, timestamp: '2026-02-23T18:01:00Z' });
+      await db.putActivity('getall-act-agent2', { ...entry, timestamp: '2026-02-23T18:02:00Z' });
+      const all = await db.getAllActivities();
+      const fromAgent1 = all.filter(e => e.agent_id === 'getall-act-agent1');
+      const fromAgent2 = all.filter(e => e.agent_id === 'getall-act-agent2');
+      expect(fromAgent1.length).toBeGreaterThanOrEqual(1);
+      expect(fromAgent2.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should respect limit parameter', async () => {
+      await db.putActivity('getall-act-lim1', { ...entry, timestamp: '2026-02-23T19:01:00Z' });
+      await db.putActivity('getall-act-lim2', { ...entry, timestamp: '2026-02-23T19:02:00Z' });
+      await db.putActivity('getall-act-lim3', { ...entry, timestamp: '2026-02-23T19:03:00Z' });
+      const limited = await db.getAllActivities(2);
+      expect(limited.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should return empty array when unavailable', async () => {
+      await db.close();
+      const result = await db.getAllActivities();
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('getAllCommits', () => {
+    const commitData = {
+      agent_id: 'getall-commit-agent',
+      commit_hash: 'abc123',
+      project_path: '/test/project',
+      task_description: 'Test commit',
+      experience_gained: 1,
+      communication_score_change: 2,
+      timestamp: new Date()
+    };
+
+    it('should return commits from all projects', async () => {
+      await db.putCommit('/project-a', 'getall-hash1', { ...commitData, project_path: '/project-a', commit_hash: 'getall-hash1' });
+      await db.putCommit('/project-b', 'getall-hash2', { ...commitData, project_path: '/project-b', commit_hash: 'getall-hash2', agent_id: 'getall-commit-agent2' });
+      const all = await db.getAllCommits();
+      const fromA = all.filter(c => c.project_path === '/project-a');
+      const fromB = all.filter(c => c.project_path === '/project-b');
+      expect(fromA.length).toBeGreaterThanOrEqual(1);
+      expect(fromB.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should respect limit parameter', async () => {
+      await db.putCommit('/proj', 'getall-lim1', { ...commitData, commit_hash: 'getall-lim1' });
+      await db.putCommit('/proj', 'getall-lim2', { ...commitData, commit_hash: 'getall-lim2' });
+      await db.putCommit('/proj', 'getall-lim3', { ...commitData, commit_hash: 'getall-lim3' });
+      const limited = await db.getAllCommits(2);
+      expect(limited.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should return empty array when unavailable', async () => {
+      await db.close();
+      const result = await db.getAllCommits();
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('close', () => {
     it('should close database connection', async () => {
       await db.close();

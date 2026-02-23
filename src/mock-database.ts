@@ -1,5 +1,5 @@
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent } from './types.js'
 
 export class MockDatabase implements Database {
   private agents: Map<string, AgentData> = new Map()
@@ -80,6 +80,41 @@ export class MockDatabase implements Database {
         entries.push(value)
         if (entries.length >= limit) break
       }
+    }
+    return entries
+  }
+
+
+  async getAllRetrospectives(limit: number = 1000): Promise<RetrospectiveWithAgent[]> {
+    if (!this.isAvailable) return []
+    const entries: RetrospectiveWithAgent[] = []
+    for (const [key, value] of this.retrospectives) {
+      const colonIndex = key.indexOf(':')
+      const agentId = colonIndex > 0 ? key.substring(0, colonIndex) : key
+      entries.push({ ...value, agent_id: agentId })
+      if (entries.length >= limit) break
+    }
+    return entries
+  }
+
+  async getAllActivities(limit: number = 1000): Promise<ActivityWithAgent[]> {
+    if (!this.isAvailable) return []
+    const entries: ActivityWithAgent[] = []
+    for (const [key, value] of this.activities) {
+      const colonIndex = key.indexOf(':')
+      const agentId = colonIndex > 0 ? key.substring(0, colonIndex) : key
+      entries.push({ ...value, agent_id: agentId })
+      if (entries.length >= limit) break
+    }
+    return entries
+  }
+
+  async getAllCommits(limit: number = 1000): Promise<CommitData[]> {
+    if (!this.isAvailable) return []
+    const entries: CommitData[] = []
+    for (const [, value] of this.commits) {
+      entries.push(value)
+      if (entries.length >= limit) break
     }
     return entries
   }

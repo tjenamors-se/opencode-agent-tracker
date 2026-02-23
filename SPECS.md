@@ -513,3 +513,115 @@ A single postinstall script (`scripts/postinstall.mjs`) that runs after `npm ins
 - [ ] Trust tier label displayed correctly for each SP range
 - [ ] XP progress bar renders correctly
 - [ ] All existing call sites work without changes
+
+---
+
+## R11: Database-Aware Brainstorm/Plan Suggestions
+
+### User Story
+As an agent working on a new feature, I want the brainstorm and planning phases
+to automatically surface relevant historical data from the LMDB database, so that
+I can learn from past successes and avoid repeating past mistakes.
+
+### Context
+- Environment: OpenCode plugin (Node.js, LMDB)
+- The plugin already stores rich historical data across 6 sub-databases:
+  agents, commits, communication, retrospectives, activities, migrations
+- During brainstorm/plan phases, agents currently start from scratch with no
+  awareness of what patterns worked or failed before
+- The centralized database holds data across all projects and scopes
+
+### Core Logic
+
+A new **query service** that searches the LMDB database for prior art when
+given a task description or feature context. It performs three searches:
+
+1. **Scope-local positive patterns**: Retrospectives and activities within the
+   same agent scope where user grades were "good" (2) or "excellence" (5)
+2. **Cross-scope positive patterns**: If scope-local results are insufficient,
+   widen search to all agents/scopes for positively-graded work
+3. **Mistake patterns**: Retrospectives where grades were "bad" (-1) from any
+   scope — these are anti-patterns to avoid
+
+The results are formatted as structured suggestions that can be injected into
+brainstorm/plan documents.
+
+### R11.1: PriorArtQuery Interface
+- New type `PriorArtQuery` with fields: `taskDescription: string`, `scope: string`,
+  `agentId?: string`, `maxResults?: number`
+- New type `PriorArtResult` with fields: `positivePatterns: PatternMatch[]`,
+  `crossScopePatterns: PatternMatch[]`, `mistakes: PatternMatch[]`
+- New type `PatternMatch` with fields: `source: 'retrospective' | 'activity' | 'commit'`,
+  `task: string`, `notes: string`, `grade?: Grade`, `agentId: string`,
+  `scope: string`, `timestamp: string`, `relevanceScore: number`
+
+### R11.2: Keyword Matching Engine
+- Extract keywords from the task description (split on whitespace, lowercase,
+  remove common stop words, minimum 3 characters)
+- Score each historical entry by counting keyword matches against its
+  `task`, `agent_note`, `user_note`, `outcome`, `decisions` fields
+- Relevance score = matched keywords / total keywords (0.0 to 1.0)
+- Minimum relevance threshold: 0.1 (at least 10% keyword overlap)
+
+### R11.3: Query Service
+- New class `QueryService` in `src/query-service.ts`
+- Constructor takes `Database` instance
+- Method `searchPriorArt(query: PriorArtQuery): Promise<PriorArtResult>`
+- Method queries retrospectives, activities, and commits from the database
+- Filters and ranks results by relevance score
+- Default `maxResults`: 5 per category
+
+### R11.4: Scope-Aware Search
+- First pass: Query only entries matching `query.scope`
+- If fewer than `maxResults` positive patterns found, second pass queries
+  all scopes (excluding already-found entries)
+- Mistake search always queries all scopes (mistakes are universal lessons)
+
+### R11.5: Result Formatting
+- Method `formatPriorArt(result: PriorArtResult): string`
+- Outputs markdown-formatted sections:
+  - `### Prior Art: Positive Patterns` (scope-local matches)
+  - `### Prior Art: Cross-Scope Patterns` (if any)
+  - `### Prior Art: Mistakes to Avoid` (bad-graded entries)
+- Each entry shows: task, relevant notes, grade, source agent/scope
+
+### R11.6: Database Interface Extension
+- Add `getAllRetrospectives(limit?: number): Promise<RetrospectiveEntry[]>` to
+  Database interface — queries across all agents
+- Add `getAllActivities(limit?: number): Promise<ActivityEntry[]>` to
+  Database interface — queries across all agents
+- Add `getAllCommits(limit?: number): Promise<CommitData[]>` to
+  Database interface — queries across all projects
+- These "getAll" methods enable cross-scope search without knowing agent IDs
+
+### R11.7: Integration Points
+- The QueryService is instantiated alongside TrackingService in the plugin
+- Results can be consumed by agents during brainstorm/plan phases
+- No automatic injection — the service provides data on demand
+- Future: Could be exposed as an OpenCode tool for agents to call directly
+
+### Constraints
+
+| Constraint              | Value                                    |
+|-------------------------|------------------------------------------|
+| Query latency           | < 100ms for typical datasets             |
+| Keyword matching        | Case-insensitive, stop-word filtered     |
+| Min relevance threshold | 0.1 (10% keyword overlap)               |
+| Max results per category| 5 (configurable)                         |
+| Cross-scope fallback    | Only when scope-local < maxResults       |
+| Database reads          | Synchronous LMDB gets (memory-mapped)    |
+| No external deps        | Pure TypeScript keyword matching          |
+
+### Validation Criteria
+
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] `npm test` passes (all existing + new tests)
+- [ ] `PriorArtQuery`, `PriorArtResult`, `PatternMatch` types defined
+- [ ] `QueryService.searchPriorArt()` returns categorized results
+- [ ] Keyword matching scores entries by relevance
+- [ ] Scope-local search runs before cross-scope fallback
+- [ ] Mistake search covers all scopes
+- [ ] `formatPriorArt()` produces readable markdown
+- [ ] `getAllRetrospectives/Activities/Commits` added to Database interface
+- [ ] Unit tests cover: keyword extraction, scoring, scope filtering, formatting

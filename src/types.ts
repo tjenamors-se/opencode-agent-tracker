@@ -108,6 +108,44 @@ export interface FlushResult {
   errors: string[]
 }
 
+
+/** Query input for searching prior art in the database (R11) */
+export interface PriorArtQuery {
+  taskDescription: string
+  scope: string
+  agentId?: string
+  maxResults?: number
+}
+
+/** A single matched pattern from historical data (R11) */
+export interface PatternMatch {
+  source: 'retrospective' | 'activity' | 'commit'
+  task: string
+  notes: string
+  grade?: Grade
+  agentId: string
+  scope: string
+  timestamp: string
+  relevanceScore: number
+}
+
+/** Categorized results from a prior art search (R11) */
+export interface PriorArtResult {
+  positivePatterns: PatternMatch[]
+  crossScopePatterns: PatternMatch[]
+  mistakes: PatternMatch[]
+}
+
+/** Retrospective entry with agent ID extracted from DB key (R11) */
+export interface RetrospectiveWithAgent extends RetrospectiveEntry {
+  agent_id: string
+}
+
+/** Activity entry with agent ID extracted from DB key (R11) */
+export interface ActivityWithAgent extends ActivityEntry {
+  agent_id: string
+}
+
 export type PluginConfig = {
   databasePath?: string
   maxDatabaseSize?: number

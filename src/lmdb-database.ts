@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join, isAbsolute, dirname } from 'path'
 import { mkdirSync } from 'fs'
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry, MigrationRecord } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent } from './types.js'
 
 const DEFAULT_PATH = join(homedir(), '.config', 'opencode', 'agent-tracker.lmdb')
 const DEFAULT_MAP_SIZE = 512 * 1024 * 1024 // 512 MB
@@ -215,6 +215,58 @@ export class LMDBDatabase implements Database {
       const range = this.activitiesDB.getRange({ start: `${agentId}:`, end: `${agentId}:~` })
       for (const { value } of range) {
         entries.push(value as ActivityEntry)
+        if (entries.length >= limit) break
+      }
+      return entries
+    } catch (_error) {
+      return []
+    }
+  }
+
+
+  async getAllRetrospectives(limit: number = 1000): Promise<RetrospectiveWithAgent[]> {
+    if (!this.isAvailable || !this.retrospectivesDB) return []
+    try {
+      const entries: RetrospectiveWithAgent[] = []
+      const range = this.retrospectivesDB.getRange({})
+      for (const { key, value } of range) {
+        const keyStr = String(key)
+        const colonIndex = keyStr.indexOf(':')
+        const agentId = colonIndex > 0 ? keyStr.substring(0, colonIndex) : keyStr
+        entries.push({ ...(value as RetrospectiveEntry), agent_id: agentId })
+        if (entries.length >= limit) break
+      }
+      return entries
+    } catch (_error) {
+      return []
+    }
+  }
+
+  async getAllActivities(limit: number = 1000): Promise<ActivityWithAgent[]> {
+    if (!this.isAvailable || !this.activitiesDB) return []
+    try {
+      const entries: ActivityWithAgent[] = []
+      const range = this.activitiesDB.getRange({})
+      for (const { key, value } of range) {
+        const keyStr = String(key)
+        const colonIndex = keyStr.indexOf(':')
+        const agentId = colonIndex > 0 ? keyStr.substring(0, colonIndex) : keyStr
+        entries.push({ ...(value as ActivityEntry), agent_id: agentId })
+        if (entries.length >= limit) break
+      }
+      return entries
+    } catch (_error) {
+      return []
+    }
+  }
+
+  async getAllCommits(limit: number = 1000): Promise<CommitData[]> {
+    if (!this.isAvailable || !this.commitsDB) return []
+    try {
+      const entries: CommitData[] = []
+      const range = this.commitsDB.getRange({})
+      for (const { value } of range) {
+        entries.push(value as CommitData)
         if (entries.length >= limit) break
       }
       return entries

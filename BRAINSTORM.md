@@ -548,3 +548,135 @@ ____ ____ ____ _  _ ___
 
 **Strategy B (Tron HUD Panel)** — it has the strongest Tron aesthetic and RPG player sheet feel. The section separators (`===`) create visual structure without Unicode box-drawing. It's more lines but within toast limits and provides the best user experience.
 
+
+---
+
+## R11: Database-Aware Brainstorm/Plan Suggestions
+
+### Strategy A: Full-Scan Keyword Matching
+
+Load all retrospectives, activities, and commits from the database, then score
+each entry against the query's keyword set.
+
+**Approach:**
+1. Extract keywords from query task description (lowercase, remove stop words,
+   min 3 chars)
+2. Call `getAllRetrospectives()`, `getAllActivities()`, `getAllCommits()` to load
+   all historical data
+3. For each entry, count keyword matches across text fields
+4. Score = matched_keywords / total_keywords
+5. Filter by minimum threshold (0.1), sort by score descending
+6. Split results into scope-local vs cross-scope vs mistakes
+
+**Pros:**
+- Simple to implement — no index building or maintenance
+- Works immediately with existing data
+- Keyword extraction is straightforward (split + filter)
+- No new dependencies
+
+**Cons:**
+- O(n) scan of all entries on every query
+- Performance degrades with large datasets (thousands of entries)
+- No semantic understanding — "refactor" won't match "restructure"
+
+**Performance estimate:** LMDB reads are memory-mapped, so scanning 1000 entries
+should complete in < 50ms. Acceptable for interactive brainstorm phases.
+
+---
+
+### Strategy B: Tag-Based Index with Separate Sub-Database
+
+Create a new `patterns` sub-database that stores pre-indexed entries with tags
+extracted at write time.
+
+**Approach:**
+1. New sub-database `patterns` with key format `tag:keyword`
+2. When a retrospective or activity is written, extract keywords and write
+   index entries pointing to the source record
+3. At query time, look up each query keyword in the patterns DB
+4. Intersect/union results based on match count
+
+**Pros:**
+- O(k) lookup where k = number of query keywords (fast)
+- Scales to very large datasets
+- Could support future semantic tags (manually assigned)
+
+**Cons:**
+- Requires maintaining a secondary index
+- Index must be rebuilt if keyword extraction logic changes
+- More complex write path (extract + index on every commit/retro)
+- 7th sub-database adds complexity to database.ts interface
+- Existing historical data needs backfill migration
+
+**Risk:** Over-engineering for current dataset sizes. The plugin tracks a single
+developer's agents — unlikely to exceed thousands of entries.
+
+---
+
+### Strategy C: Hybrid — Full Scan with Cached Results
+
+Full-scan approach (Strategy A) but cache results in memory during a session.
+
+**Approach:**
+1. Same keyword matching as Strategy A
+2. On first query in a session, load and score all entries
+3. Cache the scored results in QueryService instance
+4. Subsequent queries in the same session reuse cached data
+5. Cache invalidated when new data is written
+
+**Pros:**
+- Fast for repeated queries in the same brainstorm session
+- Simple implementation, no new sub-database
+- Memory overhead is bounded (single session lifetime)
+
+**Cons:**
+- First query still does full scan
+- Cache invalidation adds complexity
+- Marginal benefit — brainstorm typically has 1-2 queries per session
+
+---
+
+### Trade-off Matrix
+
+| Aspect              | Strategy A     | Strategy B       | Strategy C      |
+|---------------------|----------------|------------------|-----------------|
+| Implementation      | Simple         | Complex          | Medium          |
+| Query performance   | O(n)           | O(k)             | O(n) first, O(1)|
+| Write overhead      | None           | Index writes     | None            |
+| New sub-databases   | 0              | 1                | 0               |
+| Interface changes   | 3 new methods  | 3+ new methods   | 3 new methods   |
+| Scalability         | Good to ~10K   | Excellent        | Good to ~10K    |
+| Maintainability     | Easy           | Hard             | Medium          |
+| Risk                | Low            | High             | Low             |
+
+### Edge Cases
+
+1. **No historical data**: Return empty results with a note "No prior art found"
+2. **Very short task description** (1-2 words): May match too broadly. Require
+   minimum 2 keywords for meaningful search.
+3. **All entries from same scope**: Cross-scope section will be empty. That's fine.
+4. **Entries with empty notes**: Skip entries where all text fields are empty.
+5. **Large number of "bad" grades**: Limit mistakes to maxResults to avoid
+   overwhelming the agent.
+
+### Risk Assessment
+
+- **LMDB read performance**: Memory-mapped reads are essentially memcpy.
+  Scanning 10K entries is microseconds. Not a real risk.
+- **Keyword matching quality**: Simple keyword matching won't understand
+  synonyms. This is acceptable for v1 — the plugin tracks one developer's
+  work, so terminology should be consistent.
+- **Database interface changes**: Adding 3 `getAll*` methods is a clean extension.
+  Both LMDBDatabase and MockDatabase need implementations. Low risk.
+- **Stop word list**: Need a reasonable English stop word list (the, a, is, etc).
+  Keep it small (~50 words) and hardcoded.
+
+### Recommendation
+
+**Strategy A (Full-Scan Keyword Matching)** — It is the simplest approach that
+meets all requirements. The dataset will realistically stay under 10K entries
+(single developer, ~40 commits so far). Full-scan with LMDB memory-mapped reads
+will complete in microseconds. No premature optimization needed.
+
+If query latency becomes an issue in the future (unlikely), Strategy B can be
+added as an optimization without changing the QueryService API.

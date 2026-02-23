@@ -590,3 +590,152 @@ M19 -> M20
 
 M19 creates the module with all logic and tests. M20 wires it in and removes the old code.
 
+
+---
+
+## R11: Database-Aware Brainstorm/Plan Suggestions
+
+**Strategy chosen:** A (Full-Scan Keyword Matching)
+
+### System Architecture
+
+```
+QueryService (new)
+  ├── extractKeywords(text) -> string[]
+  ├── scoreEntry(keywords, entry) -> number
+  ├── searchPriorArt(query) -> PriorArtResult
+  └── formatPriorArt(result) -> string
+
+Database (extended)
+  ├── getAllRetrospectives(limit?) -> RetrospectiveEntry[]
+  ├── getAllActivities(limit?) -> ActivityEntry[]
+  └── getAllCommits(limit?) -> CommitData[]
+```
+
+QueryService depends only on Database interface. No coupling to TrackingService.
+
+### Interface Contracts
+
+```typescript
+// src/types.ts — new types
+
+export interface PriorArtQuery {
+  taskDescription: string
+  scope: string
+  agentId?: string
+  maxResults?: number
+}
+
+export interface PatternMatch {
+  source: 'retrospective' | 'activity' | 'commit'
+  task: string
+  notes: string
+  grade?: Grade
+  agentId: string
+  scope: string
+  timestamp: string
+  relevanceScore: number
+}
+
+export interface PriorArtResult {
+  positivePatterns: PatternMatch[]
+  crossScopePatterns: PatternMatch[]
+  mistakes: PatternMatch[]
+}
+```
+
+```typescript
+// src/database.ts — 3 new methods added to Database interface
+
+getAllRetrospectives(limit?: number): Promise<RetrospectiveEntry[]>
+getAllActivities(limit?: number): Promise<ActivityEntry[]>
+getAllCommits(limit?: number): Promise<CommitData[]>
+```
+
+```typescript
+// src/query-service.ts — new module
+
+export class QueryService {
+  constructor(db: Database)
+  extractKeywords(text: string): string[]
+  scoreEntry(keywords: string[], fields: string[]): number
+  searchPriorArt(query: PriorArtQuery): Promise<PriorArtResult>
+  formatPriorArt(result: PriorArtResult): string
+}
+```
+
+### Milestones
+
+#### M21: Types + Database Interface Extension
+**Files:** `src/types.ts`, `src/database.ts`, `src/lmdb-database.ts`, `src/mock-database.ts`
+**Tasks:**
+- Add `PriorArtQuery`, `PatternMatch`, `PriorArtResult` types to types.ts
+- Add `getAllRetrospectives`, `getAllActivities`, `getAllCommits` to Database interface
+- Implement in LMDBDatabase (range scan without agent prefix)
+- Implement in MockDatabase (iterate all stored entries)
+- Tests: verify getAll methods return entries from multiple agents
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M22: QueryService — Keyword Extraction + Scoring
+**Files:** `src/query-service.ts`, `tests/unit/query-service.test.ts`
+**Tasks:**
+- Create QueryService class with constructor taking Database
+- Implement `extractKeywords()`: lowercase, split on non-alpha, filter stop words,
+  min 3 chars, deduplicate
+- Implement `scoreEntry()`: count keyword matches across fields, return ratio
+- Hardcoded stop word list (~50 common English words)
+- Tests: keyword extraction edge cases, scoring accuracy
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M23: QueryService — searchPriorArt + Scope Filtering
+**Files:** `src/query-service.ts`, `tests/unit/query-service.test.ts`
+**Tasks:**
+- Implement `searchPriorArt()` method
+- Load all retrospectives, activities, commits from DB
+- Score each against query keywords
+- Filter by minimum threshold (0.1)
+- Split into: scope-local positives, cross-scope positives, mistakes
+- Sort each category by relevance score descending
+- Limit each category to maxResults (default 5)
+- Tests: scope filtering, cross-scope fallback, mistake detection, empty DB
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M24: QueryService — formatPriorArt + Integration
+**Files:** `src/query-service.ts`, `tests/unit/query-service.test.ts`
+**Tasks:**
+- Implement `formatPriorArt()` method
+- Output markdown sections for each non-empty category
+- Each entry: task, notes, grade label, source agent/scope, relevance %
+- Handle empty results gracefully ("No prior art found")
+- Tests: format output structure, empty sections omitted, grade labels correct
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+### Dependency Tree
+
+```
+M21 -> M22 -> M23 -> M24
+```
+
+Each milestone builds on the previous. M21 provides data access, M22 provides
+scoring primitives, M23 assembles the search logic, M24 adds formatting.
+
+### Milestone Summary
+
+| Milestone | Task | Files | Size |
+|-----------|------|-------|------|
+| M21 | Types + Database getAll methods | types.ts, database.ts, lmdb-database.ts, mock-database.ts, tests | Medium |
+| M22 | QueryService keyword extraction + scoring | query-service.ts, tests | Small |
+| M23 | searchPriorArt with scope filtering | query-service.ts, tests | Medium |
+| M24 | formatPriorArt + integration | query-service.ts, tests | Small |
