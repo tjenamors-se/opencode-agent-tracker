@@ -1,5 +1,5 @@
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent, ProjectProfile } from './types.js'
 
 export class MockDatabase implements Database {
   private agents: Map<string, AgentData> = new Map()
@@ -8,6 +8,7 @@ export class MockDatabase implements Database {
   private retrospectives: Map<string, RetrospectiveEntry> = new Map()
   private activities: Map<string, ActivityEntry> = new Map()
   private migrations: Map<string, MigrationRecord> = new Map()
+  private projects: Map<string, ProjectProfile> = new Map()
   public isAvailable: boolean = true
 
   constructor() {
@@ -130,6 +131,27 @@ export class MockDatabase implements Database {
     return this.migrations.get(sourceDir) ?? null
   }
 
+  async putProject(path: string, profile: ProjectProfile): Promise<boolean> {
+    if (!this.isAvailable) return false
+    this.projects.set(path, profile)
+    return true
+  }
+
+  async getProject(path: string): Promise<ProjectProfile | null> {
+    if (!this.isAvailable) return null
+    return this.projects.get(path) ?? null
+  }
+
+  async getAllProjects(limit: number = 1000): Promise<ProjectProfile[]> {
+    if (!this.isAvailable) return []
+    const entries: ProjectProfile[] = []
+    for (const [, value] of this.projects) {
+      entries.push(value)
+      if (entries.length >= limit) break
+    }
+    return entries
+  }
+
   async close(): Promise<void> {
     this.isAvailable = false
   }
@@ -145,5 +167,6 @@ export class MockDatabase implements Database {
     this.retrospectives.clear()
     this.activities.clear()
     this.migrations.clear()
+    this.projects.clear()
   }
 }

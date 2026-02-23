@@ -1,5 +1,5 @@
 import { LMDBDatabase } from '../../src/lmdb-database';
-import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry } from '../../src/types';
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, ProjectProfile } from '../../src/types';
 
 describe('LMDBDatabase', () => {
   let db: LMDBDatabase;
@@ -351,6 +351,76 @@ describe('LMDBDatabase', () => {
     it('should return empty array when unavailable', async () => {
       await db.close();
       const result = await db.getAllCommits();
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('putProject / getProject / getAllProjects', () => {
+    const profileA: ProjectProfile = {
+      path: '/home/user/project-a',
+      language: 'typescript',
+      framework: 'express',
+      scope: 'API',
+      dependencies: ['express', 'typescript', 'jest'],
+      manifestType: 'package.json',
+      classifiedAt: '2026-02-23T10:00:00.000Z',
+      agentsmdHash: 'abc123'
+    };
+
+    const profileB: ProjectProfile = {
+      path: '/home/user/project-b',
+      language: 'php',
+      framework: 'laravel',
+      scope: 'CMS',
+      dependencies: ['laravel/framework', 'phpunit/phpunit'],
+      manifestType: 'composer.json',
+      classifiedAt: '2026-02-23T11:00:00.000Z',
+      agentsmdHash: 'def456'
+    };
+
+    it('should store and retrieve a project profile', async () => {
+      await db.putProject(profileA.path, profileA);
+      const retrieved = await db.getProject(profileA.path);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.language).toBe('typescript');
+      expect(retrieved?.framework).toBe('express');
+      expect(retrieved?.scope).toBe('API');
+      expect(retrieved?.dependencies).toEqual(['express', 'typescript', 'jest']);
+    });
+
+    it('should return null for non-existent project', async () => {
+      const result = await db.getProject('/no/such/project');
+      expect(result).toBeNull();
+    });
+
+    it('should retrieve all projects with getAllProjects', async () => {
+      await db.putProject(profileA.path, profileA);
+      await db.putProject(profileB.path, profileB);
+      const all = await db.getAllProjects();
+      expect(all.length).toBe(2);
+      const languages = all.map(p => p.language).sort();
+      expect(languages).toEqual(['php', 'typescript']);
+    });
+
+    it('should respect limit in getAllProjects', async () => {
+      await db.putProject(profileA.path, profileA);
+      await db.putProject(profileB.path, profileB);
+      const limited = await db.getAllProjects(1);
+      expect(limited.length).toBe(1);
+    });
+
+    it('should overwrite existing project on re-put', async () => {
+      await db.putProject(profileA.path, profileA);
+      const updated = { ...profileA, framework: 'fastify', agentsmdHash: 'new-hash' };
+      await db.putProject(profileA.path, updated);
+      const retrieved = await db.getProject(profileA.path);
+      expect(retrieved?.framework).toBe('fastify');
+      expect(retrieved?.agentsmdHash).toBe('new-hash');
+    });
+
+    it('should return empty array when unavailable', async () => {
+      await db.close();
+      const result = await db.getAllProjects();
       expect(result).toEqual([]);
     });
   });

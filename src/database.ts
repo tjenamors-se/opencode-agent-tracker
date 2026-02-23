@@ -1,4 +1,4 @@
-import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent, ProjectProfile } from './types.js'
 
 export interface Database {
   isAvailable: boolean
@@ -17,5 +17,8 @@ export interface Database {
   getAllRetrospectives(limit?: number): Promise<RetrospectiveWithAgent[]>
   getAllActivities(limit?: number): Promise<ActivityWithAgent[]>
   getAllCommits(limit?: number): Promise<CommitData[]>
+  putProject(path: string, profile: ProjectProfile): Promise<boolean>
+  getProject(path: string): Promise<ProjectProfile | null>
+  getAllProjects(limit?: number): Promise<ProjectProfile[]>
   close(): Promise<void>
 }

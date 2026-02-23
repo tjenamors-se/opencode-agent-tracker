@@ -680,3 +680,450 @@ will complete in microseconds. No premature optimization needed.
 
 If query latency becomes an issue in the future (unlikely), Strategy B can be
 added as an optimization without changing the QueryService API.
+
+---
+
+## R12: Cross-Project Learning System — Brainstorm
+
+**Date**: 2026-02-23
+**Input**: SPECS.md R12 (R12.1-R12.7)
+
+---
+
+### Decision 1: How to Parse AGENTS.md
+
+The AGENTS.md file contains agent definition fields (Name, Model, Language,
+Framework, Scope) but in varying formats: Markdown tables, YAML frontmatter,
+free-form text, or a mix.
+
+#### Option A: Regex-Based Table/Field Extraction
+
+Parse AGENTS.md using regex patterns that look for:
+- Markdown table rows: `| Language | TypeScript |`
+- Key-value pairs: `Language: TypeScript` or `**Language**: TypeScript`
+- Heading-based sections: `## Language\nTypeScript`
+
+```typescript
+const FIELD_PATTERNS = {
+  language: /(?:language|lang)\s*[:|]\s*(\w+)/i,
+  framework: /(?:framework|fw)\s*[:|]\s*([\w.-]+)/i,
+  scope: /(?:scope|domain)\s*[:|]\s*(\w+)/i,
+}
+```
+
+**Pros:**
+- Simple to implement (~40 lines)
+- Handles most common AGENTS.md formats
+- No external parser dependency
+- Best-effort by design — returns "unknown" if no match
+
+**Cons:**
+- Won't catch creative formatting
+- Regex can be brittle with unexpected whitespace
+- Doesn't understand Markdown structure (just text matching)
+
+#### Option B: Markdown AST Parsing
+
+Use a Markdown parser (e.g., `marked`, `remark`) to build an AST, then walk
+the tree looking for tables with field names and heading sections.
+
+**Pros:**
+- Structurally correct parsing
+- Handles nested formatting, links in values, etc.
+- More robust against formatting variations
+
+**Cons:**
+- New dependency (we want to stay at lmdb-only for runtime deps)
+- Over-engineered for best-effort classification
+- AST walking is more code than regex
+- Still falls back to "unknown" if fields aren't present
+
+#### Option C: Line-by-Line Field Scanner
+
+Read AGENTS.md line by line. For each line, check if it contains a known
+field name followed by a separator (|, :, =) and a value. Track context
+via simple state (current heading).
+
+```typescript
+for (const line of content.split('\n')) {
+  const trimmed = line.trim()
+  // Check table format: | Field | Value |
+  const tableMatch = trimmed.match(/^\|?\s*(Language|Framework|Scope)\s*\|\s*(.+?)\s*\|?$/i)
+  if (tableMatch) { fields[tableMatch[1].toLowerCase()] = tableMatch[2].trim() }
+  // Check key: value format
+  const kvMatch = trimmed.match(/^\*?\*?(Language|Framework|Scope)\*?\*?\s*[:=]\s*(.+)$/i)
+  if (kvMatch) { fields[kvMatch[1].toLowerCase()] = kvMatch[2].trim() }
+}
+```
+
+**Pros:**
+- No dependency needed
+- Handles both table and key-value formats
+- Clear, readable code
+- Easy to extend with new field patterns
+- Line-by-line is more predictable than multi-line regex
+
+**Cons:**
+- Slightly more code than Option A
+- Doesn't handle multi-line values (not needed for our fields)
+
+**Recommendation: Option C (Line-by-Line Field Scanner)**
+
+Most robust without adding dependencies. The fields we extract (language,
+framework, scope) are always single-line values. Line-by-line scanning is
+deterministic and easy to test. Falls back to "unknown" for anything it
+can't parse — exactly what the spec requires.
+
+---
+
+### Decision 2: Manifest File Support in v1
+
+The spec lists 7 manifest formats. How many should v1 support?
+
+#### Option A: Full Support (All 7)
+
+Implement parsers for package.json, composer.json, Cargo.toml, pyproject.toml,
+requirements.txt, go.mod, pom.xml, build.gradle, Gemfile.
+
+**Pros:** Complete from day one.
+**Cons:** 7+ parsers is a lot of code. TOML, XML, and Gradle need custom parsers
+(no runtime deps). Testing surface is large. Many of these formats may never be
+encountered by this user.
+
+#### Option B: Top 3 (package.json, composer.json, Cargo.toml)
+
+Focus on the most common formats. JSON is trivially parsed. Cargo.toml has a
+simple `[dependencies]` section parseable with regex. composer.json is JSON.
+
+**Pros:**
+- Covers TypeScript/JavaScript, PHP, Rust — the user's primary languages
+- JSON parsing is free (built-in). TOML dependency section is simple regex.
+- Manageable test surface (~30 lines per parser)
+- Others can be added later without changing the interface
+
+**Cons:**
+- Python/Go/Java/Ruby projects won't be classified from manifests
+- Still classifiable from AGENTS.md though
+
+#### Option C: JSON-Only (package.json, composer.json) + Detection-Only for Others
+
+Parse JSON manifests fully. For non-JSON manifests, only detect their
+existence (to infer language) without extracting dependencies.
+
+```typescript
+// Full parse: extract deps
+if (exists('package.json')) → parse JSON, extract dependencies
+if (exists('composer.json')) → parse JSON, extract require
+
+// Detection only: infer language
+if (exists('Cargo.toml')) → language = 'rust', deps = []
+if (exists('go.mod')) → language = 'go', deps = []
+if (exists('pyproject.toml') || exists('requirements.txt')) → language = 'python', deps = []
+```
+
+**Pros:**
+- Zero custom parsers for non-JSON formats
+- All 7 languages detectable
+- Dependency extraction where it matters most (npm/composer ecosystems)
+- Simplest implementation
+- Still enables similarity scoring via language/framework matching
+
+**Cons:**
+- No dependency data for Rust/Go/Python/Java/Ruby projects
+- Dependency overlap scoring only works for Node.js and PHP projects
+
+**Recommendation: Option C (JSON-Only Parse + Detection for Others)**
+
+Best balance. The user's projects are primarily TypeScript and possibly PHP.
+Full dependency extraction for those two ecosystems covers the primary use
+case. For other languages, just knowing the language is enough for similarity
+scoring (language has the highest weight at 0.4). Dependencies only contribute
+0.1 to the similarity score — not worth complex TOML/XML parsers.
+
+---
+
+### Decision 3: Git Log Search Strategy
+
+When LMDB search returns zero results, fall back to searching git log of
+similar projects.
+
+#### Option A: `git log --oneline` + Keyword Match
+
+```bash
+git -C /path/to/project log --oneline -n 200
+```
+Returns `<hash> <message>` per line. Match keywords against commit messages.
+
+**Pros:** Simple, fast, universal. One-line output is easy to parse.
+**Cons:** Only gets the first line of commit messages. No diff context.
+
+#### Option B: `git log --format` with Custom Format
+
+```bash
+git -C /path/to/project log --format="%H|%s|%b" -n 200
+```
+Returns hash, subject, and body separated by `|`.
+
+**Pros:** Gets full commit body for better keyword matching.
+**Cons:** Multi-line body complicates parsing. Pipe character might appear in
+messages. Needs `%x00` (null byte) as separator for reliable parsing.
+
+#### Option C: `git log --oneline --grep` for Server-Side Filtering
+
+```bash
+git -C /path/to/project log --oneline --grep="keyword1\|keyword2" -n 50
+```
+Let git do the filtering. Only matching commits are returned.
+
+**Pros:** Fastest — git filters before output. Minimal data transfer.
+**Cons:** Git grep syntax is limited. Multiple keywords need `\|` (OR).
+Can't do relevance scoring (just match/no-match). Can't combine with AND
+logic easily.
+
+#### Option D: Hybrid — `--oneline` with Post-Filter Scoring
+
+Use `--oneline` for raw data (Option A), then apply the same `scoreEntry()`
+keyword matching from QueryService. This reuses existing code.
+
+```typescript
+const output = execSync(`git -C ${path} log --oneline -n 200`, { timeout: 5000 })
+const lines = output.toString().split('\n')
+for (const line of lines) {
+  const [hash, ...messageParts] = line.split(' ')
+  const message = messageParts.join(' ')
+  const score = this.scoreEntry(keywords, [message])
+  if (score >= minRelevance) matches.push({ hash, message, score })
+}
+```
+
+**Pros:**
+- Reuses existing `scoreEntry()` and keyword infrastructure
+- Relevance scoring for ranking (not just match/no-match)
+- Simple, reliable parsing
+- Consistent behavior with LMDB search (same scoring algorithm)
+
+**Cons:**
+- Loads 200 lines into memory per project (trivial)
+- Subject-line only (no body), but usually sufficient for commit messages
+
+**Recommendation: Option D (Hybrid — oneline + scoreEntry)**
+
+Reusing `scoreEntry()` gives consistent behavior between LMDB and git log
+search paths. The `--oneline` format is universally reliable. Subject-line
+matching is sufficient — commit bodies are rarely searched in practice.
+The 200-commit limit and 5s timeout keep it bounded.
+
+---
+
+### Decision 4: Store Git Log Results or Query Live?
+
+#### Option A: Always Query Live
+
+Run `git log` on every fallback search. Don't cache results.
+
+**Pros:** Always fresh. No stale data. No extra storage.
+**Cons:** Slower if multiple searches hit fallback in one session.
+
+#### Option B: Cache in Memory for Session Duration
+
+Store git log results in QueryService instance memory. Invalidate on new
+session.
+
+**Pros:** Fast for repeated fallback queries in same session.
+**Cons:** Extra complexity. Fallback queries are rare by design (only when
+LMDB has zero results). Marginal benefit.
+
+#### Option C: Store in LMDB
+
+Cache git log matches in a new sub-database.
+
+**Pros:** Persistent cache across sessions.
+**Cons:** Over-engineered. Git log results become stale. Adds an 8th sub-db.
+Need cache invalidation strategy.
+
+**Recommendation: Option A (Always Query Live)**
+
+Git log fallback is the last resort — it only fires when LMDB search finds
+nothing. This is rare. Running `git log --oneline -n 200` takes <100ms
+even for large repos. No caching needed.
+
+---
+
+### Decision 5: `/init` Tool Integration
+
+How to register the `init-project` tool in the plugin.
+
+#### Option A: Inline Tool Definition (Same as `migrate-agent-tracker`)
+
+Add `init-project` to the `tool` object returned by the plugin, next to
+`migrate-agent-tracker`. The execute function calls `ProjectClassifier`,
+stores the profile, and returns a summary.
+
+```typescript
+tool: {
+  'migrate-agent-tracker': { ... },
+  'init-project': {
+    description: 'Register this project for cross-project learning...',
+    args: {},
+    async execute(_args, ctx) {
+      const classifier = new ProjectClassifier()
+      const profile = await classifier.classifyProject(ctx.directory)
+      await db.putProject(ctx.directory, profile)
+      return `Project classified: ${profile.language}/${profile.framework} (${profile.scope})`
+    }
+  }
+}
+```
+
+**Pros:**
+- Consistent with existing tool registration pattern
+- Simple, no new abstraction
+- Tool is available as `/init-project` in OpenCode
+
+**Cons:**
+- Index.ts grows slightly
+
+#### Option B: Separate Module with Tool Factory
+
+Create a function `createInitTool(db, classifier)` that returns the tool
+definition. Import and spread into the tool object.
+
+**Pros:** Keeps index.ts cleaner. Tool logic is isolated.
+**Cons:** Over-abstraction for a single tool. More files to maintain.
+
+**Recommendation: Option A (Inline Tool Definition)**
+
+The existing `migrate-agent-tracker` tool is defined inline. Follow the same
+pattern. The init-project tool is ~15 lines of code — not worth a separate
+module.
+
+---
+
+### Decision 6: Auto-Classification Trigger
+
+R12.7 says to auto-classify on `session.created` if the project is not yet
+profiled. How to implement?
+
+#### Option A: Check DB in session.created, classify if missing
+
+```typescript
+'session.created': async (session) => {
+  // ... existing hooks ...
+  await autoClassifyProject(directory)
+}
+
+async function autoClassifyProject(projectPath: string) {
+  const existing = await db.getProject(projectPath)
+  if (existing) {
+    // Check if AGENTS.md changed (hash comparison)
+    const currentHash = hashAgentsMd(projectPath)
+    if (currentHash === existing.agentsmdHash) return
+  }
+  const classifier = new ProjectClassifier()
+  const profile = await classifier.classifyProject(projectPath)
+  await db.putProject(projectPath, profile)
+}
+```
+
+**Pros:**
+- Automatic, zero user action needed
+- Hash comparison avoids unnecessary re-classification
+- Fits naturally into existing session.created flow
+
+**Cons:**
+- Adds latency to session start (file reads + DB write)
+- Should be fire-and-forget (wrapped in try/catch, never blocks session)
+
+#### Option B: Lazy classification on first cross-project search
+
+Only classify when another project actually searches for similar projects.
+
+**Pros:** Zero overhead if cross-project search is never used.
+**Cons:** Projects can't be found until some other project triggers a search.
+Defeats the purpose of `/init`.
+
+**Recommendation: Option A (Check DB on session.created)**
+
+The whole point is that projects register themselves so OTHER projects can
+find them later. This must be proactive, not lazy. File reads for AGENTS.md
+and package.json are < 1ms. The DB write goes through the write buffer. Total
+overhead is negligible.
+
+---
+
+### Edge Case Analysis
+
+#### E1: No AGENTS.md and No Manifest File
+Project has no recognizable files. All fields default to "unknown".
+Profile is still stored — the project path is registered so it can be
+found, even if classification is empty.
+
+#### E2: AGENTS.md Exists but Has No Field Table
+Free-form AGENTS.md without structured fields. Scanner finds nothing.
+Language/framework/scope all default to "unknown". Manifest file may
+still provide language and dependencies.
+
+#### E3: Multiple Manifest Files (package.json AND Cargo.toml)
+Monorepo or polyglot project. Use the first match in priority order
+(package.json wins). The `manifestType` field records which one was used.
+
+#### E4: Project Path Changes (Moved/Renamed Directory)
+Old path remains in DB, new path gets a new entry. No automatic cleanup.
+Stale entries are harmless — git log fallback will fail gracefully when
+the old path no longer exists.
+
+#### E5: Git Log Fallback on Non-Git Directory
+`git -C /path log` fails with exit code 128. Catch error, skip this
+project, continue with others. Return empty results for that path.
+
+#### E6: Very Large AGENTS.md (> 100KB)
+Unlikely but possible. Read only the first 10KB for classification.
+The fields we need are always near the top (agent definition table).
+
+#### E7: Concurrent Sessions Classifying Same Project
+Two sessions start simultaneously for the same project. Both run
+auto-classify. Both write the same profile. Last write wins — this is
+fine because the profile is deterministic (same files = same result).
+
+#### E8: Git Binary Not Available
+`execSync('git ...')` throws. Catch error, return empty git log results.
+Log a warning. The LMDB-based search is still available.
+
+#### E9: Circular Similarity (Project A finds B, B finds A)
+Not a problem. Cross-project search returns data FROM similar projects,
+not a reference to them. There's no graph traversal.
+
+#### E10: getAllProjects Returns Hundreds of Projects
+Similarity scoring runs on all projects. With 100 projects, scoring is
+100 comparisons — trivial. If it ever matters, pre-filter by language.
+
+---
+
+### Risk Assessment
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| AGENTS.md parsing fails | Low | Medium | All fields default to "unknown" |
+| Git log timeout (>5s) | Low | Low | execSync timeout option |
+| No similar projects found | None | High (early) | Graceful empty result |
+| LMDB 7th sub-db issue | Medium | Low | maxDbs already set to 10 |
+| execSync blocks event loop | Low | Low | 5s timeout, only on fallback |
+| Manifest JSON parse error | Low | Low | try/catch, default to "unknown" |
+| Auto-classify slows session start | Low | Low | Fire-and-forget, <5ms |
+
+---
+
+### Trade-off Matrix
+
+| Aspect | Chosen Approach | Alternative | Why |
+|--------|----------------|-------------|-----|
+| AGENTS.md parsing | Line-by-line scanner | Regex / AST | No deps, predictable, testable |
+| Manifest support | JSON parse + detect others | All 7 full parse | 80/20 rule, deps contribute 0.1 to score |
+| Git log strategy | --oneline + scoreEntry() | --grep, --format | Reuses existing code, ranked results |
+| Git log caching | Always live | Session/LMDB cache | Fallback is rare, <100ms live |
+| /init integration | Inline tool definition | Separate module | Follows existing pattern |
+| Auto-classify | session.created check | Lazy on first search | Projects must register proactively |
+
+---
+
+**Architectural paths explored in BRAINSTORM.md. Use `architect-plan` to map the build.**

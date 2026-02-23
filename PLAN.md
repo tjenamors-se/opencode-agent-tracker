@@ -739,3 +739,223 @@ scoring primitives, M23 assembles the search logic, M24 adds formatting.
 | M22 | QueryService keyword extraction + scoring | query-service.ts, tests | Small |
 | M23 | searchPriorArt with scope filtering | query-service.ts, tests | Medium |
 | M24 | formatPriorArt + integration | query-service.ts, tests | Small |
+
+---
+
+## R12: Cross-Project Learning System
+
+**Date**: 2026-02-23
+**Strategy:** Line-by-line AGENTS.md scanner, JSON-only manifest parse + detection,
+`--oneline` + `scoreEntry()` git log matching, inline tool definition, auto-classify
+on session.created.
+
+### System Architecture
+
+```
+Plugin Entry (index.ts)
+  │
+  ├── ProjectClassifier           (project-classifier.ts) NEW
+  │     classifyProject(path) -> ProjectProfile
+  │     ├── parseAgentsMd(content) -> { language, framework, scope }
+  │     ├── parseManifest(path) -> { language, framework, deps, manifestType }
+  │     └── hashContent(content) -> string
+  │
+  ├── LMDBDatabase                (lmdb-database.ts)
+  │     ...existing 6 sub-dbs...
+  │     └── projects DB           (sub-db, 7th) NEW
+  │
+  ├── QueryService                (query-service.ts)
+  │     ...existing methods...
+  │     ├── searchCrossProject(query, currentPath, db) NEW
+  │     └── searchGitLog(paths, keywords, limit) NEW
+  │
+  └── init-project tool           (inline in index.ts) NEW
+        classify + store profile
+```
+
+### Interface Contracts
+
+```typescript
+// src/types.ts — new types
+
+export interface ProjectProfile {
+  path: string
+  language: string
+  framework: string
+  scope: string
+  dependencies: string[]
+  manifestType: string
+  classifiedAt: string    // ISO 8601
+  agentsmdHash: string
+}
+
+export interface GitLogMatch {
+  projectPath: string
+  commitHash: string
+  message: string
+  relevanceScore: number
+}
+```
+
+```typescript
+// src/database.ts — 3 new methods
+
+putProject(path: string, profile: ProjectProfile): Promise<boolean>
+getProject(path: string): Promise<ProjectProfile | null>
+getAllProjects(limit?: number): Promise<ProjectProfile[]>
+```
+
+```typescript
+// src/project-classifier.ts — new module
+
+export class ProjectClassifier {
+  classifyProject(projectPath: string): Promise<ProjectProfile>
+  parseAgentsMd(content: string): { language: string; framework: string; scope: string }
+  parseManifest(projectPath: string): Promise<{
+    language: string
+    framework: string
+    dependencies: string[]
+    manifestType: string
+  }>
+  scoreSimilarity(a: ProjectProfile, b: ProjectProfile): number
+}
+```
+
+```typescript
+// src/query-service.ts — extended
+
+searchGitLog(projectPaths: string[], keywords: string[], limit: number): GitLogMatch[]
+```
+
+### Milestones
+
+#### M25: ProjectProfile type + projects sub-database
+**Files:** `src/types.ts`, `src/database.ts`, `src/lmdb-database.ts`,
+`src/mock-database.ts`, `tests/unit/lmdb-database.test.ts`
+**Tasks:**
+- Add `ProjectProfile` and `GitLogMatch` types to types.ts
+- Add `putProject`, `getProject`, `getAllProjects` to Database interface
+- Implement in LMDBDatabase: 7th sub-database `projects`, keyed by path
+- Implement in MockDatabase: Map-based storage
+- Tests: put/get/getAll for projects sub-db (3-5 tests)
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M26: ProjectClassifier — AGENTS.md + manifest parsing + similarity
+**Files:** `src/project-classifier.ts` (NEW), `tests/unit/project-classifier.test.ts` (NEW)
+**Tasks:**
+- Create ProjectClassifier class
+- `parseAgentsMd(content)`: line-by-line scanner for Language, Framework, Scope
+  - Handles table format (`| Field | Value |`)
+  - Handles key-value format (`Field: Value`, `**Field**: Value`)
+  - Returns `{ language, framework, scope }` with "unknown" defaults
+- `parseManifest(projectPath)`: checks manifest files in priority order
+  - `package.json`: parse JSON, extract name from `dependencies` + `devDependencies`
+    keys, infer `language` = "typescript" if `typescript` in deps else "javascript",
+    infer `framework` from known packages (next, express, react, etc.)
+  - `composer.json`: parse JSON, extract `require` keys, language = "php",
+    infer framework from known packages (laravel/framework, symfony/*, etc.)
+  - Other manifests (Cargo.toml, go.mod, pyproject.toml, requirements.txt,
+    pom.xml, build.gradle, Gemfile): detection-only, infer language, deps = []
+  - Returns `{ language, framework, dependencies, manifestType }`
+- `classifyProject(projectPath)`: combines AGENTS.md + manifest results
+  - AGENTS.md fields take priority over manifest-inferred fields
+  - Computes `agentsmdHash` using Node.js `crypto.createHash('sha256')`
+  - Returns complete `ProjectProfile`
+- `scoreSimilarity(a, b)`: weighted scoring
+  - Same language: +0.4
+  - Same framework: +0.3
+  - Same scope: +0.2
+  - Shared deps: +0.1 * (sharedCount / max(a.deps.length, b.deps.length))
+  - Returns 0.0 to 1.0
+- Tests (~20-25 tests):
+  - parseAgentsMd: table format, key-value format, mixed, empty, no fields
+  - parseManifest: package.json with typescript, without, composer.json,
+    Cargo.toml detection, no manifest
+  - classifyProject: full classification, AGENTS.md priority over manifest
+  - scoreSimilarity: identical, same lang only, no overlap, partial deps
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M27: Git log fallback + cross-project search
+**Files:** `src/query-service.ts`, `tests/unit/query-service.test.ts`
+**Tasks:**
+- Add `searchGitLog(projectPaths, keywords, limit)` method to QueryService
+  - Runs `execSync('git -C <path> log --oneline -n 200', { timeout: 5000 })`
+  - Parses each line: `<hash> <message>`
+  - Scores message against keywords using existing `scoreEntry()`
+  - Filters by minRelevance (0.1), sorts by score descending
+  - Returns `GitLogMatch[]` limited to `limit`
+  - Catches errors per project (non-git dirs, missing dirs), skips them
+- Extend `searchPriorArt()` signature with optional `projectPath` param
+- When `projectPath` is provided:
+  - Instantiate ProjectClassifier, classify current project
+  - Get all projects from DB via `db.getAllProjects()`
+  - Score similarity, filter by threshold (0.3)
+  - Pull retrospectives/activities/commits for agents in similar projects
+  - Tag results with source project path
+  - If DB search returns 0 results across all categories:
+    call `searchGitLog()` with similar project paths
+- Tests (~10-15 tests):
+  - searchGitLog: mock execSync, verify parsing and scoring
+  - searchGitLog: error handling (non-git dir, timeout)
+  - searchPriorArt with projectPath: cross-project results found
+  - searchPriorArt with projectPath: fallback to git log
+  - searchPriorArt without projectPath: unchanged behavior
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+#### M28: init-project tool + auto-classify hook
+**Files:** `src/index.ts`, `tests/unit/plugin.test.ts`
+**Tasks:**
+- Add `init-project` tool to the tool object in index.ts:
+  - description: "Register this project for cross-project learning. Classifies
+    the project based on AGENTS.md and manifest files."
+  - args: {} (no arguments needed)
+  - execute: classify project via ProjectClassifier, store via db.putProject(),
+    return summary string with language/framework/scope/deps count
+- Add `autoClassifyProject(directory)` function:
+  - Check `db.getProject(directory)` — if exists, compare agentsmdHash
+  - If hash unchanged: skip (already classified, no changes)
+  - If hash changed or not yet classified: classify and store
+  - Fire-and-forget (wrapped in try/catch, never blocks session)
+- Wire `autoClassifyProject(directory)` into `session.created` hook
+- Tests:
+  - init-project tool: classify and store (mock classifier)
+  - auto-classify: skip if already classified with same hash
+  - auto-classify: re-classify if hash changed
+  - auto-classify: handle errors gracefully
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+### Dependency Tree
+
+```
+M25 -> M26 -> M27 -> M28
+```
+
+M25 provides the data layer (types + DB methods).
+M26 provides classification and similarity logic.
+M27 extends search with cross-project + git log.
+M28 wires everything into the plugin entry point.
+
+### Milestone Summary
+
+| Milestone | Task | New/Modified Files | Size |
+|-----------|------|--------------------|------|
+| M25 | ProjectProfile type + projects sub-db | types.ts, database.ts, lmdb-database.ts, mock-database.ts, tests | Small |
+| M26 | ProjectClassifier module | project-classifier.ts (NEW), tests (NEW) | Large |
+| M27 | Git log fallback + cross-project search | query-service.ts, tests | Medium |
+| M28 | init-project tool + auto-classify | index.ts, tests | Medium |
+
+---
+
+**Blueprint ready. Use `engineer-build` to begin implementation.**

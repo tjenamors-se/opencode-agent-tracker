@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join, isAbsolute, dirname } from 'path'
 import { mkdirSync } from 'fs'
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry, MigrationRecord, RetrospectiveWithAgent, ActivityWithAgent, ProjectProfile } from './types.js'
 
 const DEFAULT_PATH = join(homedir(), '.config', 'opencode', 'agent-tracker.lmdb')
 const DEFAULT_MAP_SIZE = 512 * 1024 * 1024 // 512 MB
@@ -18,6 +18,7 @@ export class LMDBDatabase implements Database {
   private retrospectivesDB: LMDBStore | null = null
   private activitiesDB: LMDBStore | null = null
   private migrationsDB: LMDBStore | null = null
+  private projectsDB: LMDBStore | null = null
   private available: boolean = false
 
   constructor(config: DatabaseConfig | string = {}) {
@@ -94,6 +95,9 @@ export class LMDBDatabase implements Database {
       })
       this.migrationsDB = this.root.openDB('migrations', {
         sharedStructuresKey: Symbol.for('structures:migrations')
+      })
+      this.projectsDB = this.root.openDB('projects', {
+        sharedStructuresKey: Symbol.for('structures:projects')
       })
 
       return true
@@ -295,6 +299,41 @@ export class LMDBDatabase implements Database {
     }
   }
 
+  async putProject(path: string, profile: ProjectProfile): Promise<boolean> {
+    if (!this.isAvailable || !this.projectsDB) return false
+    try {
+      await this.projectsDB.put(path, profile)
+      return true
+    } catch (_error) {
+      return false
+    }
+  }
+
+  async getProject(path: string): Promise<ProjectProfile | null> {
+    if (!this.isAvailable || !this.projectsDB) return null
+    try {
+      const result = this.projectsDB.get(path) as ProjectProfile | undefined
+      return result ?? null
+    } catch (_error) {
+      return null
+    }
+  }
+
+  async getAllProjects(limit: number = 1000): Promise<ProjectProfile[]> {
+    if (!this.isAvailable || !this.projectsDB) return []
+    try {
+      const entries: ProjectProfile[] = []
+      const range = this.projectsDB.getRange({})
+      for (const { value } of range) {
+        entries.push(value as ProjectProfile)
+        if (entries.length >= limit) break
+      }
+      return entries
+    } catch (_error) {
+      return []
+    }
+  }
+
   async close(): Promise<void> {
     try { if (this.agentsDB) await this.agentsDB.close() } catch (_e) { /* already closed */ }
     try { if (this.commitsDB) await this.commitsDB.close() } catch (_e) { /* already closed */ }
@@ -302,12 +341,14 @@ export class LMDBDatabase implements Database {
     try { if (this.retrospectivesDB) await this.retrospectivesDB.close() } catch (_e) { /* already closed */ }
     try { if (this.activitiesDB) await this.activitiesDB.close() } catch (_e) { /* already closed */ }
     try { if (this.migrationsDB) await this.migrationsDB.close() } catch (_e) { /* already closed */ }
+    try { if (this.projectsDB) await this.projectsDB.close() } catch (_e) { /* already closed */ }
     this.agentsDB = null
     this.commitsDB = null
     this.communicationDB = null
     this.retrospectivesDB = null
     this.activitiesDB = null
     this.migrationsDB = null
+    this.projectsDB = null
     try { if (this.root) await this.root.close() } catch (_e) { /* already closed */ }
     this.root = null
     this.available = false

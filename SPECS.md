@@ -625,3 +625,113 @@ brainstorm/plan documents.
 - [ ] `formatPriorArt()` produces readable markdown
 - [ ] `getAllRetrospectives/Activities/Commits` added to Database interface
 - [ ] Unit tests cover: keyword extraction, scoring, scope filtering, formatting
+
+---
+
+## R12: Cross-Project Learning System
+
+### User Story
+As a user, I want the agent to learn from other projects by classifying each
+project based on its AGENTS.md and manifest files (package.json, composer.json,
+etc.), storing that classification in the centralized LMDB database, and then
+searching across similar projects for relevant patterns — falling back to
+git log of known project directories when the database has no matches.
+
+### Context
+- Environment: OpenCode plugin (Node.js, LMDB centralized database)
+- The plugin already tracks retrospectives, activities, and commits per agent
+- The plugin runs across multiple projects over time, accumulating data
+- Each project may have an AGENTS.md and/or manifest files describing its stack
+- A new project with no history should be able to `/init` to register itself
+  so other projects can discover it later
+
+### Core Logic
+
+#### R12.1: ProjectProfile Type
+A new type `ProjectProfile` stored in a new `projects` sub-database:
+- `path: string` — absolute project directory path
+- `language: string` — primary language (e.g., "typescript", "php", "rust")
+- `framework: string` — primary framework (e.g., "next.js", "laravel", "express")
+- `scope: string` — domain from AGENTS.md (e.g., "CMS", "API", "CLI")
+- `dependencies: string[]` — key dependency names from manifest
+- `manifestType: string` — which manifest was found (e.g., "package.json")
+- `classifiedAt: Date` — when the profile was created/updated
+- `agentsmdHash: string` — hash of AGENTS.md content for change detection
+
+#### R12.2: Project Classifier
+A new class `ProjectClassifier` in `src/project-classifier.ts`:
+- `classifyProject(projectPath: string): Promise<ProjectProfile>`
+- Parses AGENTS.md for: language, framework, scope fields
+- Parses manifest files in priority order:
+  1. `package.json` (Node.js/TypeScript/JavaScript)
+  2. `composer.json` (PHP)
+  3. `Cargo.toml` (Rust)
+  4. `pyproject.toml` / `requirements.txt` (Python)
+  5. `go.mod` (Go)
+  6. `pom.xml` / `build.gradle` (Java/Kotlin)
+  7. `Gemfile` (Ruby)
+- Extracts dependency names from manifest
+- Falls back to "unknown" for any field that cannot be determined
+
+#### R12.3: Projects Sub-Database
+- New 7th sub-database `projects` in LMDB
+- Key: project path (string)
+- Value: `ProjectProfile`
+- Add `putProject(path, profile)` and `getProject(path)` to Database interface
+- Add `getAllProjects(limit?)` for cross-project discovery
+
+#### R12.4: Project Similarity Scoring
+- Method `scoreSimilarity(a: ProjectProfile, b: ProjectProfile): number`
+- Scoring weights:
+  - Same language: +0.4
+  - Same framework: +0.3
+  - Same scope: +0.2
+  - Shared dependencies: +0.1 * (shared / max(a.deps, b.deps))
+- Returns 0.0 to 1.0. Minimum similarity threshold: 0.3
+
+#### R12.5: Cross-Project Search
+- Extend `QueryService.searchPriorArt()` to accept optional `projectPath`
+- When provided, classify current project, find similar projects in DB
+- Pull retrospectives/activities/commits from agents in similar projects
+- Results tagged with source project path for attribution
+
+#### R12.6: Git Log Fallback
+- New method `searchGitLog(projectPaths: string[], keywords: string[], limit: number): GitLogMatch[]`
+- Runs `git -C <path> log --oneline -n 200` for each similar project path
+- Keyword-matches commit messages against the task description
+- Returns matches sorted by relevance
+- Only triggered when LMDB search returns zero results
+- New type `GitLogMatch`: `{ projectPath, commitHash, message, relevanceScore }`
+
+#### R12.7: /init Command Integration
+- New tool `init-project` registered in the plugin
+- When called: classifies the current project and stores its profile in LMDB
+- Also triggered automatically on `session.created` if project not yet profiled
+- On re-init: updates the profile if AGENTS.md has changed (hash comparison)
+
+### Constraints
+
+| Constraint              | Value                                    |
+|-------------------------|------------------------------------------|
+| Manifest parsing        | Read-only, no external deps              |
+| Git log                 | Max 200 commits per project, 5s timeout  |
+| Similarity threshold    | 0.3 minimum for "similar"                |
+| New sub-databases       | 1 (projects)                             |
+| Git fallback            | Only when DB search returns 0 results    |
+| /init                   | Idempotent, safe to run multiple times   |
+| AGENTS.md parsing       | Best-effort, never crash on malformed    |
+
+### Validation Criteria
+
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] `npm test` passes (all existing + new tests)
+- [ ] `ProjectProfile` type defined with all fields
+- [ ] `ProjectClassifier` parses AGENTS.md and at least package.json + composer.json
+- [ ] Projects sub-database added to Database interface and both implementations
+- [ ] `scoreSimilarity()` scores projects by language/framework/scope/deps
+- [ ] `searchPriorArt()` extended with cross-project support
+- [ ] Git log fallback searches known project directories
+- [ ] `init-project` tool registers project profile in LMDB
+- [ ] Auto-classification on session.created for new projects
+- [ ] Unit tests cover: classification, similarity scoring, git log parsing, /init

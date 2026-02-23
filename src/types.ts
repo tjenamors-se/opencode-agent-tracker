@@ -146,6 +146,26 @@ export interface ActivityWithAgent extends ActivityEntry {
   agent_id: string
 }
 
+/** Project classification profile for cross-project learning (R12) */
+export interface ProjectProfile {
+  path: string
+  language: string
+  framework: string
+  scope: string
+  dependencies: string[]
+  manifestType: string
+  classifiedAt: string
+  agentsmdHash: string
+}
+
+/** Git log match result for cross-project fallback search (R12) */
+export interface GitLogMatch {
+  projectPath: string
+  commitHash: string
+  message: string
+  relevanceScore: number
+}
+
 export type PluginConfig = {
   databasePath?: string
   maxDatabaseSize?: number
