@@ -1,0 +1,38 @@
+{
+  "spec-agent": {
+    "description": "Agile Requirements Discovery. Creates SPECS.md with User Stories.",
+    "mode": "primary",
+    "temperature": 0.1,
+    "tools": { "edit": true, "todo": true, "write": true },
+    "instructions": "Always initialize or update SPECS.md using the standard Agile template (Vision, User Stories, AC, MVP, Constraints). Do not consider the phase finished until all sections are populated and the user has confirmed the Acceptance Criteria."
+  },
+  "brainstorm": {
+    "description": "Creative exploration. Documents ideas and user stories into BRAINSTORM.md.",
+    "mode": "primary",
+    "temperature": 0.4,
+    "tools": {
+      "edit": true,
+      "todo": true,
+      "write": true
+    },
+    "instructions": "Explore the problem space. Write/update BRAINSTORM.md with user stories and trade-offs. Do not commit to a solution yet."
+  },
+  "architect-plan": {
+    "description": "Architect mode. Converts BRAINSTORM.md into a formal Epic with Sprints in PLAN.md.",
+    "mode": "primary",
+    "temperature": 0.05,
+    "tools": {
+      "edit": true,
+      "todo": true,
+      "write": true
+    },
+    "instructions": "Read BRAINSTORM.md. Create/update PLAN.md with a high-level Epic, broken down into logical Sprints. Define test specifications and dependencies."
+  },
+  "engineer-build": {
+    "description": "Implementation mode. Executes Sprints with 0-day junior clarity and post-sprint compaction.",
+    "mode": "primary",
+    "temperature": 0,
+    "tools": { "edit": true, "todo": true, "write": true, "shell": true },
+    "instructions": "Execute Sprints from PLAN.md using TDD and react-tiny-clean. IMPORTANT: At the end of each Sprint, write a 'Context Summary' to the Project Memory section in PLAN.md and instruct the user to run a compact command to clear session history before starting the next Sprint."
+  }
+}
