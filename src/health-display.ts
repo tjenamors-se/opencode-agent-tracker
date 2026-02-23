@@ -1,4 +1,3 @@
-import figlet from 'figlet'
 import type { AgentHealthStatus } from './types.js'
 
 const MAX_WIDTH = 80
@@ -16,20 +15,10 @@ export function getTrustTier(sp: number): string {
 }
 
 /**
- * Renders agent name as FIGlet ASCII art using Cybermedium font.
- * Falls back to plain uppercase text if rendered width exceeds MAX_WIDTH.
+ * Renders agent name as plain uppercase text.
  */
 export function renderAgentName(name: string): string {
-  try {
-    const rendered = figlet.textSync(name, {
-      font: 'Cybersmall',
-      width: MAX_WIDTH,
-      whitespaceBreak: true,
-    })
-    return rendered
-  } catch {
-    return name.toUpperCase()
-  }
+  return name.toUpperCase()
 }
 
 /**
@@ -50,13 +39,13 @@ export function renderProgressBar(current: number, max: number, width: number): 
 
 /**
  * Formats AgentHealthStatus into a Tron HUD player sheet.
- * Uses FIGlet Cybermedium for agent name, pure ASCII layout, no Unicode box-drawing.
+ * Pure ASCII layout, no Unicode box-drawing, no external dependencies.
  */
 export function formatHealthStatus(health: AgentHealthStatus): string {
   const lines: string[] = []
 
   const nameArt = renderAgentName(health.agent_id)
-  lines.push(nameArt)
+  lines.push(`  ${nameArt}`)
 
   const tier = getTrustTier(health.skill_points)
   const sp = health.skill_points.toFixed(1)

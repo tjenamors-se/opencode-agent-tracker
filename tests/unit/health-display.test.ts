@@ -34,24 +34,19 @@ describe('getTrustTier', () => {
 });
 
 describe('renderAgentName', () => {
-  it('should render a short name with FIGlet Cybermedium', () => {
+  it('should render name as uppercase text', () => {
     const result = renderAgentName('Test');
-    expect(result).toContain('___');
-    expect(result.split('\n').length).toBeGreaterThan(1);
+    expect(result).toBe('TEST');
   });
 
-  it('should wrap long names within 60 columns using FIGlet width option', () => {
-    const longName = 'AgentTracker-Core';
-    const result = renderAgentName(longName);
-    const maxWidth = result.split('\n').reduce((max: number, line: string) => Math.max(max, line.length), 0);
-    expect(maxWidth).toBeLessThanOrEqual(80);
-    expect(result).toContain('___');
+  it('should handle hyphenated names', () => {
+    const result = renderAgentName('AgentTracker-Core');
+    expect(result).toBe('AGENTTRACKER-CORE');
   });
 
-  it('should produce output within 60 columns for short names', () => {
-    const result = renderAgentName('Agent');
-    const maxWidth = result.split('\n').reduce((max: number, line: string) => Math.max(max, line.length), 0);
-    expect(maxWidth).toBeLessThanOrEqual(80);
+  it('should handle already-uppercase names', () => {
+    const result = renderAgentName('AGENT');
+    expect(result).toBe('AGENT');
   });
 });
 
@@ -103,9 +98,9 @@ describe('formatHealthStatus', () => {
     };
   }
 
-  it('should contain the agent name rendered with FIGlet', () => {
+  it('should contain the agent name in uppercase', () => {
     const result = formatHealthStatus(makeHealth());
-    expect(result).toContain('___');
+    expect(result).toContain('TESTBOT');
   });
 
   it('should display trust tier', () => {

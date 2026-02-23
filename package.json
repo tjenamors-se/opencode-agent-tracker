@@ -38,14 +38,12 @@
     "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
-    "figlet": "^1.10.0",
     "lmdb": "^3.5.1"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.29.0",
     "@babel/preset-typescript": "^7.28.5",
     "@opencode-ai/plugin": "^1.2.10",
-    "@types/figlet": "^1.7.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
