@@ -23,27 +23,86 @@ export interface CommitData {
   timestamp: Date
 }
 
+/** Grade values for communication scoring (R7, R8.5) */
+export type Grade = -1 | 1 | 2 | 5
+
+/** Grade label mapping */
+export const GRADE_LABELS: Record<Grade, string> = {
+  [-1]: 'bad',
+  [1]: 'neutral',
+  [2]: 'good',
+  [5]: 'excellence'
+}
+
 export interface CommunicationScoreEvent {
   agent_id: string
   commit_hash: string
   project_path: string
-  grade: -1 | 1 | 2
+  grade: Grade
   timestamp: Date
   reason?: string
 }
 
-import type { Database } from './database.js'
-
-export interface TrackingServiceOptions {
-  databasePath: string
-  compression: boolean
-  cacheSize: string
+/** Database configuration for LMDBDatabase (R1, R2, R3) */
+export interface DatabaseConfig {
+  /** Database file path. Default: path.join(os.homedir(), '.config', 'opencode', 'agent-tracker.lmdb') */
+  path?: string
+  /** Maximum database size in bytes. Default: 512 MB. Range: 1 MB..2 GB */
+  maxSize?: number
+  /** Enable LMDB compression. Default: true */
+  compression?: boolean
 }
 
-export interface DatabaseInterface extends Database {}
+/** Retrospective entry for communication journal (R8.2) */
+export interface RetrospectiveEntry {
+  commit: string
+  timestamp: string
+  task: string
+  agent_grade: Grade
+  user_grade: Grade
+  score_before: number
+  score_after: number
+  agent_note: string
+  user_note: string
+}
+
+/** Activity journal entry (R8.3) */
+export interface ActivityEntry {
+  timestamp: string
+  task: string
+  actions: string
+  outcome: string
+  decisions: string
+}
+
+/** Agent status snapshot (R8.1) */
+export interface AgentStatus {
+  id: string
+  skill_points: number
+  experience_points: number
+  communication_score: number
+  total_commits: number
+  total_bugs: number
+  halted: boolean
+  active: boolean
+}
+
+/** Result of a migration operation (R4) */
+export interface MigrationResult {
+  entriesMigrated: number
+  entriesSkipped: number
+  errors: string[]
+}
+
+/** Result of flushing the write buffer (R6) */
+export interface FlushResult {
+  entriesWritten: number
+  errors: string[]
+}
 
 export type PluginConfig = {
   databasePath?: string
+  maxDatabaseSize?: number
   enableGitHooks?: boolean
   enableNotifications?: boolean
   enableEnvironmentProtection?: boolean
