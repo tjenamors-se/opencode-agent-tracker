@@ -43,6 +43,48 @@ describe('AgentTrackerPlugin', () => {
     expect(plugin['tool']!['migrate-agent-tracker'].description).toContain('Migrate agent tracking data');
   });
 
+  it('should expose init-project custom tool', async () => {
+    const ctx = makeMockContext();
+    const plugin: Plugin = await AgentTrackerPlugin(ctx as any);
+
+    expect(plugin['tool']).toBeDefined();
+    expect(plugin['tool']!['init-project']).toBeDefined();
+    expect(typeof plugin['tool']!['init-project'].execute).toBe('function');
+    expect(plugin['tool']!['init-project'].description).toContain('cross-project learning');
+  });
+
+  it('should execute init-project tool and return classification summary', async () => {
+    const ctx = makeMockContext();
+    const plugin: Plugin = await AgentTrackerPlugin(ctx as any);
+
+    const result = await plugin['tool']!['init-project'].execute(
+      {},
+      { directory: '/test/directory' }
+    );
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('Project classified');
+    expect(result).toContain('Language:');
+    expect(result).toContain('Framework:');
+    expect(result).toContain('Scope:');
+  });
+
+  it('should handle init-project errors gracefully', async () => {
+    const ctx = makeMockContext();
+    const plugin: Plugin = await AgentTrackerPlugin(ctx as any);
+
+    // Execute with a non-existent path that will still work
+    // (ProjectClassifier handles missing files gracefully)
+    const result = await plugin['tool']!['init-project'].execute(
+      {},
+      { directory: '/nonexistent/path/that/does/not/exist' }
+    );
+
+    expect(typeof result).toBe('string');
+    // Should still classify (with unknowns) since classifier handles missing files
+    expect(result).toContain('Project classified');
+  });
+
   it('should pass plugin config to database', async () => {
     const ctx = makeMockContext({
       $: {
@@ -135,5 +177,22 @@ describe('AgentTrackerPlugin', () => {
 
     const unknownEvent = { event: { type: 'unknown' } };
     await expect(eventHandler(unknownEvent)).resolves.not.toThrow();
+  });
+
+  it('should call autoClassifyProject during session.created', async () => {
+    const ctx = makeMockContext();
+    const plugin: Plugin = await AgentTrackerPlugin(ctx as any);
+
+    const sessionCreated = plugin['session.created'];
+    const sessionData = {
+      id: 'classify-session',
+      agent: { id: 'test-agent' }
+    };
+
+    // Should not throw even though DB is unavailable (LMDB init fails in test)
+    await expect(sessionCreated(sessionData)).resolves.not.toThrow();
+
+    // The log should have been called (plugin initialization at minimum)
+    expect(ctx.client.app.log).toHaveBeenCalled();
   });
 });

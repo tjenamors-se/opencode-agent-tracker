@@ -5,6 +5,7 @@ import { WriteBuffer } from './write-buffer.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 import { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
+import { ProjectClassifier } from './project-classifier.js'
 import type { PluginConfig, DatabaseConfig } from './types.js'
 import { formatHealthStatus } from './health-display.js'
 
@@ -37,6 +38,7 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
   const dependencyChecker = new DependencyChecker(client)
   const trackingService = new TrackingService(db, writeBuffer, client)
   const envProtection = new EnvProtection()
+  const classifier = new ProjectClassifier()
 
   await client.app.log({
     body: {
@@ -185,6 +187,37 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
     }
   }
 
+  /**
+   * Auto-classifies the current project for cross-project learning.
+   * Compares agentsmdHash to skip re-classification when unchanged.
+   * Fire-and-forget: errors are logged but never block the session.
+   */
+  async function autoClassifyProject(projectDir: string): Promise<void> {
+    if (!db.isAvailable) return
+
+    try {
+      const profile = await classifier.classifyProject(projectDir)
+      const existing = await db.getProject(projectDir)
+
+      if (existing && existing.agentsmdHash === profile.agentsmdHash) {
+        return
+      }
+
+      await db.putProject(projectDir, profile)
+
+      await client.app.log({
+        body: {
+          service: 'agent-tracker',
+          level: 'info',
+          message: `Project classified: ${profile.language}/${profile.framework} (${profile.scope})`,
+          extra: { path: projectDir, manifestType: profile.manifestType, depsCount: profile.dependencies.length }
+        }
+      }).catch(() => {})
+    } catch (_error) {
+      // Classification failure must never block the session
+    }
+  }
+
   return {
     tool: {
       'migrate-agent-tracker': {
@@ -211,6 +244,32 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
           }
 
           return lines.join('\n')
+        }
+      },
+
+      'init-project': {
+        description: 'Register this project for cross-project learning. Classifies the project based on AGENTS.md and manifest files.',
+        args: {},
+        async execute(_args: Record<string, never>, ctx: { directory: string }) {
+          const projectDir = ctx.directory
+
+          try {
+            const profile = await classifier.classifyProject(projectDir)
+            await db.putProject(projectDir, profile)
+
+            const lines: string[] = []
+            lines.push(`Project classified and registered:`)
+            lines.push(`  Path: ${profile.path}`)
+            lines.push(`  Language: ${profile.language}`)
+            lines.push(`  Framework: ${profile.framework}`)
+            lines.push(`  Scope: ${profile.scope}`)
+            lines.push(`  Dependencies: ${profile.dependencies.length}`)
+            lines.push(`  Manifest: ${profile.manifestType}`)
+
+            return lines.join('\n')
+          } catch (error) {
+            return `Failed to classify project: ${String(error)}`
+          }
         }
       }
     },
@@ -247,6 +306,7 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
       await dependencyChecker.validate()
       await trackingService.initializeSessionTracking(session)
       await autoMigrate()
+      await autoClassifyProject(directory)
       await guardAgentHealth(session)
       await showHealthStatus(session)
     },
