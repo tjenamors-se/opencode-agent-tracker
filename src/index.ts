@@ -97,7 +97,7 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
 
       if (health.halted) {
         const statusText = formatHealthStatus(health)
-        await client.tui.toast.show({
+        await client?.tui?.toast?.show({
           message: `AGENT HALTED: ${agentId} has SP <= 0. All actions blocked.\n${statusText}`,
           variant: 'error'
         }).catch(() => {})
@@ -159,18 +159,18 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
         })
 
         if (result.errors.length > 0) {
-          await client.tui.toast.show({
+          await client?.tui?.toast?.show({
             message: `Migration completed with ${result.errors.length} error(s). Check logs.`,
             variant: 'warning'
           })
         } else {
-          await client.tui.toast.show({
+          await client?.tui?.toast?.show({
             message: `Migrated ${result.entriesMigrated} entries from old database. Old ./~ removed.`,
             variant: 'info'
           })
         }
       } else {
-        await client.tui.toast.show({
+        await client?.tui?.toast?.show({
           message: 'Found ./~ directory but no agent-tracker database inside. This may have been created by something else. Please inspect and remove manually if not needed.',
           variant: 'warning'
         })
@@ -266,14 +266,14 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
 
     event: async ({ event }: { event: any }) => {
       if (event.type === 'session.created' && !db.isAvailable) {
-        await client.tui.toast.show({
+        await client?.tui?.toast?.show({
           message: 'Agent tracking disabled - LMDB unavailable',
           variant: 'warning'
         })
       }
 
       if (event.type === 'session.idle') {
-        await client.tui.toast.show({
+        await client?.tui?.toast?.show({
           message: 'Session completed - retrospective generated',
           variant: 'info'
         })
