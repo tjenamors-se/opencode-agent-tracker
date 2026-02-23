@@ -17,8 +17,30 @@
     "agent_grade": "good",
     "user_grade": "excellence",
     "score_before": 64,
-    "score_after": 69,
+    "score_after": 71,
     "agent_note": "Write pattern analysis grounded spec in real code paths",
+    "user_note": ""
+  },
+  {
+    "commit": "9bb6618",
+    "timestamp": "2026-02-23T19:00:00",
+    "task": "Add BRAINSTORM.md: three architectural strategies for R1-R7",
+    "agent_grade": "good",
+    "user_grade": "good",
+    "score_before": 71,
+    "score_after": 73,
+    "agent_note": "Thorough strategy comparison, E7 memory guard caught early",
+    "user_note": "Skipped grading - proceeded to R8"
+  },
+  {
+    "commit": "50f221a",
+    "timestamp": "2026-02-23T19:30:00",
+    "task": "Update SPECS.md with R8 agent state management",
+    "agent_grade": "neutral",
+    "user_grade": "good",
+    "score_before": 73,
+    "score_after": 77,
+    "agent_note": "Missed Bug 4 in own behavior - should have caught cat/EOF irony earlier",
     "user_note": ""
   }
 ]
