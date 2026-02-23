@@ -3,8 +3,9 @@ export class DependencyChecker {
 
   async validate(): Promise<boolean> {
     try {
-      // Check if LMDB is available
-      const available = await this.checkLMDB()
+      // Check if LMDB is available - don't block initialization
+      // We'll check LMDB lazily when actually needed
+      const available = await this.checkLMDBLazy()
       
       if (!available) {
         await this.showDependencyWarning()
@@ -13,28 +14,24 @@ export class DependencyChecker {
       
       return true
     } catch (error) {
-      console.error('Dependency validation failed:', error)
       await this.showDependencyWarning()
       return false
     }
   }
 
-  private async checkLMDB(): Promise<boolean> {
+  private async checkLMDBLazy(): Promise<boolean> {
     try {
-      // Try to import LMDB to check availability
-      // This will throw if LMDB is not properly installed
-      const { open } = await import('lmdb')
-      
-      // Try to open a test database
-      const testDB = await open({
-        path: ':memory:',
-        maxDbs: 1
-      })
-      
-      await testDB.close()
+      // Quick check - try to require LMDB without blocking
+      // This is much faster and doesn't initialize the full database
+      if (typeof require === 'function') {
+        // CommonJS environment
+        require('lmdb')
+      } else {
+        // ES Module environment - use static import
+        await import('lmdb')
+      }
       return true
     } catch (error) {
-      console.error('LMDB check failed:', error)
       return false
     }
   }

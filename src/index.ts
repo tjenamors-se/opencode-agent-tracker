@@ -4,7 +4,7 @@ import { TrackingService } from './tracking-service.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 
-export const AgentTrackerPlugin: Plugin = async (context: any) => {
+const AgentTrackerPlugin: Plugin = async (context: any) => {
   const { project, client, directory } = context
   // Initialize database
   const db = new LMDBDatabase()
@@ -52,6 +52,7 @@ export const AgentTrackerPlugin: Plugin = async (context: any) => {
     },
     
     'session.created': async (session: any) => {
+      // Validate dependencies lazily when session starts
       await dependencyChecker.validate()
       await trackingService.initializeSessionTracking(session)
     },

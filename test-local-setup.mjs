@@ -3,7 +3,7 @@
 // Local testing harness for OpenCode Agent Tracker plugin
 // Usage: node test-local-setup.mjs
 
-import { AgentTrackerPlugin } from './dist/index.js'
+import AgentTrackerPlugin from './dist/index.js'
 
 // Mock OpenCode client
 const mockClient = {

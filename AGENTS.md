@@ -5,7 +5,8 @@ This file contains development guidelines for agentic coding assistants working 
 ## Project Overview
 
 **Package**: `@tjenamors.se/opencode-agent-tracker`  
-**Language**: TypeScript (strict mode)  
+**Language**: TypeScript (strict mode) with ES Modules  
+**Target**: Node.js >=18.0.0, ES2022  
 **Framework**: OpenCode Plugin System  
 **Database**: LMDB (Lightning Memory-Mapped Database)  
 **Goal**: High-performance agent tracking for OpenCode
@@ -17,6 +18,9 @@ This file contains development guidelines for agentic coding assistants working 
 # Install dependencies
 npm install
 
+# Build TypeScript to dist/
+npm run build
+
 # Type checking (essential for TypeScript strict mode)
 npm run typecheck
 
@@ -27,98 +31,103 @@ npm run lint
 npm test
 
 # Run specific test file
-npm test -- tests/unit/tracking-service.test.ts
+npm test -- tests/unit/env-protection.test.ts
 
-# Run tests in verbose mode for debugging
-npm test -- --verbose
+# Watch mode for tests
+npm run test:watch
 
-# Performance benchmarking (planned)
-npm run benchmark
-
-# Build distribution (planned)
-npm run build
+# Coverage reporting
+npm run test:coverage
 
 # Clean build artifacts
 npm run clean
+
+# Local plugin testing
+npm run test-local
+
+# Setup local symlink
+npm run setup-local
 ```
 
 ### Testing Strategy
-- **Target**: 100% test coverage (minimum acceptable: 80%)
-- **Structure**: Unit tests in `tests/unit/`, integration tests in `tests/integration/`
+- **Target**: 80% test coverage minimum (configured in jest.config.cjs)
+- **Structure**: Unit tests in `tests/unit/`
 - **Pattern**: All new code must include corresponding tests
-- **Debug**: Use `--verbose` flag for detailed test output
+- **Debug**: Use `npm run test:watch` for development
+- **Coverage**: Excludes `index.ts` and `types.ts` from coverage requirements
 
 ## Code Style Guidelines
 
-### TypeScript Conventions
-```typescript
-// Strict mode enforced
+### TypeScript Configuration
+The project uses strict TypeScript with comprehensive checks:
+```json
 {
   "strict": true,
   "noImplicitAny": true,
   "noImplicitReturns": true,
-  "noUncheckedIndexedAccess": true
+  "noUncheckedIndexedAccess": true,
+  "strictNullChecks": true,
+  "forceConsistentCasingInFileNames": true
 }
+```
 
-// Variable naming
+### Variable Naming
+```typescript
 const camelCaseVariable = 'value'      // Variables and functions
-class PascalCaseClass {}               // Classes and interfaces
-const UPPER_SNAKE_CASE = 'constant'    // Constants
-interface IPascalCaseInterface {}       // Interface naming
-
-// Type annotations required
-function processData(data: InputData): OutputData {
-  // Implementation
-}
+class PascalCaseClass {}               // Classes
+export interface IPascalCaseInterface {} // Interfaces
+const UPPER_SNAKE_CASE = 'CONSTANT'    // Constants
 ```
 
 ### Import Organization
 ```typescript
 // External dependencies first
-import { EventEmitter } from 'events'
+import { open } from 'lmdb'
 
 // Internal modules grouped by functionality
-import { Database } from '../lmdb-database'
+import { EnvProtection } from '../env-protection'
 import { TrackingService } from '../tracking-service'
 
-// Type imports
-import type { AgentData, CommitData } from '../types'
+// Type imports (when not used in runtime)
+import type { AgentData, PluginConfig } from '../types'
 ```
 
 ### Error Handling Pattern
 ```typescript
-// Always handle LMDB errors gracefully
+// Always handle errors gracefully with clear messages
 try {
-  await db.put(key, value)
+  await someOperation()
 } catch (error) {
-  console.error('Database operation failed:', error)
-  // Graceful degradation: continue without tracking
-  return degradedFunctionality()
+  console.error('Operation failed:', error)
+  // Graceful degradation when possible
+  return fallbackOption()
 }
 
-// Use specific error types
+// Use specific error types when available
 if (error instanceof DatabaseError) {
   handleDatabaseError(error)
-} else if (error instanceof ValidationError) {
-  handleValidationError(error)
+} else {
+  handleGenericError(error)
 }
 ```
 
-### Function Documentation
+### Function Documentation (JSDoc)
 ```typescript
 /**
- * Updates agent experience points after successful tool execution
- * @param agentId - Unique identifier for the agent
- * @param experienceGained - XP amount to add
- * @returns Updated agent data with new XP total
+ * Validates file paths against .env patterns
+ * @param filePath - Path to check for .env protection
+ * @returns True if file matches .env pattern
  */
-async function incrementExperience(
-  agentId: string,
-  experienceGained: number
-): Promise<AgentData> {
+private isEnvFile(filePath: string): boolean {
   // Implementation
 }
 ```
+
+### ESLint Rules
+The project uses basic ESLint with TypeScript support:
+- `@typescript-eslint/no-unused-vars` with `argsIgnorePattern: '^_'`
+- `prefer-const` enforced
+- `no-var` enforced
 
 ## Project-Specific Patterns
 
@@ -127,39 +136,38 @@ async function incrementExperience(
 // Use memory-mapped database for performance
 import { open } from 'lmdb'
 
-// Database operations should be transactional
-await db.transaction(() => {
-  db.put(`agent:${agentId}`, agentData)
-  db.put(`commit:${projectPath}:${hash}`, commitData)
-})
-
-// Handle graceful degradation
-if (!db.available) {
-  console.warn('Running in degraded mode - tracking disabled')
-  return
+// Database operations should handle errors gracefully
+async function storeAgentData(agentId: string, data: AgentData) {
+  try {
+    await db.put(`agent:${agentId}`, data)
+  } catch (error) {
+    console.error('Failed to store agent data:', error)
+    // Continue without tracking when database fails
+  }
 }
 ```
 
 ### OpenCode Plugin Integration
 ```typescript
-// Register plugin hooks
-opencodeHook('tool.execute.after', async (event) => {
-  await trackingService.trackToolUsage(event)
-})
+// Plugin structure expects export and opencode property
+import { opencodeHook } from '@opencode-ai/plugin'
 
-// Follow OpenCode event system conventions
-opencodeHook('session.created', initializeAgentTracking)
-opencodeHook('session.idle', saveFinalMetrics)
+export const plugin = {
+  name: 'agent-tracker',
+  hooks: {
+    'tool.execute.before': async (input) => {
+      // Plugin logic
+    }
+  }
+}
 ```
 
-### Git Hook Integration
+### Environment File Protection
 ```typescript
-// Validate agent registration in git hooks
-opencodeHook('tool.execute.before', (event) => {
-  if (event.command?.includes('git commit')) {
-    validateAgentRegistration(event.agentId)
-  }
-})
+// Strict protection against .env file operations
+if (tool === 'read' && this.isEnvFile(args.filePath)) {
+  throw new Error('Do not read .env files')
+}
 ```
 
 ## Naming Conventions
@@ -168,95 +176,42 @@ opencodeHook('tool.execute.before', (event) => {
 ```
 src/
 ├── index.ts              # Main plugin entry point
-├── lmdb-database.ts     # LMDB wrapper
-├── tracking-service.ts   # XP/SP tracking logic
-├── event-hooks.ts       # OpenCode event handlers
-├── validation/          # Data validation schemas
+├── env-protection.ts    # .env file protection system
+├── lmdb-database.ts     # LMDB wrapper and database operations
+├── tracking-service.ts  # XP/SP and communication score tracking
+├── dependency-checker.ts # Plugin dependency validation
 └── types.ts            # TypeScript type definitions
+
+tests/
+└── unit/               # Unit tests separated by functionality
 ```
 
 ### Key Patterns
-- **Prefix-based keys**: `agent:${id}`, `commit:${project}:${hash}`
-- **Event names**: Use OpenCode standard event names
-- **Configuration**: Centralize all config in `config.ts`
+- **Prefix-based keys**: `agent:${id}` for database keys
+- **Error messages**: Clear, specific error messages for each failure scenario
+- **Configuration**: Central configuration via PluginConfig interface
 
-## Version Synchronization
-
-### Git Tag Strategy
-The package.json version should always match the latest git tag:
-
-```bash
-# Check current git tags
-git tag -l
-
-# Create new version tag
-git tag v$(npm pkg get version | tr -d '"')
-
-git push origin --tags
-```
-
-### Version Bump Commands
-Use semantic versioning with npm for consistency:
-
-```bash
-# Bump patch version (bug fixes)
-npm version patch
-
-# Bump minor version (new features)
-npm version minor
-
-# Bump major version (breaking changes)
-npm version major
-
-# Alpha releases for development
-npm version 0.0.0-alpha-$(git rev-parse --short HEAD)
-```
-
-### Pre-release Verification
-Before each release version:
-- [ ] Update package.json version
-- [ ] Create matching git tag
-- [ ] Push tags to remote
-- [ ] Verify GitHub Actions CI passes
-
-## Commit Guidelines
-
-### Commit Message Format
-```
-feat: add agent registration functionality
-fix: resolve LMDB initialization error
-docs: update API documentation
-test: add coverage for tracking service
-chore: update dependencies
-perf: optimize database queries
-```
-
-### Branch Strategy
-- `main` - Production-ready code
-- `develop` - Development branch  
-- `feature/feature-name` - Feature branches
-- `fix/bug-name` - Bug fix branches
-
-## Quality Assurance
+## Development Workflow
 
 ### Before Committing Code
 - [ ] Run `npm run typecheck` - No TypeScript errors
-- [ ] Run `npm run lint` - Linting passes
+- [ ] Run `npm run lint` - Linting passes  
 - [ ] Run `npm test` - All tests pass
 - [ ] Test coverage meets minimum 80% requirement
 - [ ] New functionality includes unit tests
 - [ ] Documentation updated if API changed
 
-### Performance Considerations
-- Optimize LMDB operations for concurrency
-- Use memory-mapped files efficiently
-- Minimize blocking operations
-- Benchmark critical paths
+### Code Quality
+- Follow existing patterns and style
+- Use TypeScript strictly typed approach
+- Handle errors gracefully with proper error messages
+- Write tests for new functionality
+- Maintain 80%+ test coverage
 
 ## Plugin-Specific Notes
 
 ### Graceful Degradation
-This plugin must continue functioning even when LMDB is unavailable:
+The plugin must continue functioning even when LMDB is unavailable:
 - Log warnings when degraded mode activated
 - Provide basic functionality without tracking
 - Never crash OpenCode session
@@ -270,21 +225,25 @@ This plugin must continue functioning even when LMDB is unavailable:
 
 ### Common Issues
 - **LMDB not available**: Plugin runs in degraded mode
-- **TypeScript errors**: Check `npm run typecheck -- --noEmit`
-- **Test failures**: Use `npm test -- --verbose` for details
+- **TypeScript errors**: Check `npm run typecheck` output
+- **Test failures**: Use `npm run test:coverage` for details
+- **Jest ESM issues**: Configured via ts-jest with ESM support
 
 ### Debug Commands
 ```bash
 # Check TypeScript issues
-npm run typecheck -- --noEmit
+npm run typecheck
 
 # Run specific test with debugging
-npm test -- tests/unit/tracking-service.test.ts --verbose
+npm run test:watch tests/unit/env-protection.test.ts
 
-# Reset test environment
+# Reset environment
 npm run clean && npm test
+
+# Local testing
+npm run test-local
 ```
 
 ---
 
-*Remember: This plugin is built for high performance and reliability. Always prioritize data integrity and user experience.*
+*Remember: This plugin is built for reliability and security. Always prioritize data integrity and graceful error handling.*

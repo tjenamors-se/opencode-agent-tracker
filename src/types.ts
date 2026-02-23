@@ -32,11 +32,15 @@ export interface CommunicationScoreEvent {
   reason?: string
 }
 
+import type { Database } from './database.js'
+
 export interface TrackingServiceOptions {
   databasePath: string
   compression: boolean
   cacheSize: string
 }
+
+export interface DatabaseInterface extends Database {}
 
 export type PluginConfig = {
   databasePath?: string

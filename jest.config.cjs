@@ -1,6 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
-  roots: ['\u003crootDir\u003e/src', '\u003crootDir\u003e/tests'],
+  roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/tests/**/*.test.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
@@ -16,10 +16,10 @@ module.exports = {
     }
   },
   reporters: ['default'],
-  moduleNameMapper: {'^(.+)\\.js$': '$1'},
+  moduleNameMapper: {
+    '^(.*)\\.js$': '$1'
+  },
   transform: {
-    '^.+\\\\.tsx?$': ['ts-jest', {
-      useESM: true
-    }]
+    '^.+\\.tsx?$': 'babel-jest'
   }
 };

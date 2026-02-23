@@ -1,5 +1,5 @@
 import type { AgentData, CommitData, CommunicationScoreEvent } from './types.js'
-import type { LMDBDatabase } from './lmdb-database.js'
+import type { Database } from './database.js'
 
 interface ToolUsageEvent {
   agentId: string
@@ -39,7 +39,7 @@ export class TrackingService {
       await this.incrementXP(agentId, 1)
     }
 
-    console.log('Tool usage tracked:', event)
+    await this.client.app.log({ body: { message: 'Tool usage tracked', agentId: event.agentId } })
   }
 
   async trackCommandCompletion(event: any): Promise<void> {
@@ -71,7 +71,7 @@ export class TrackingService {
     await this.incrementXP(agentId, commitData.experience_gained)
     await this.incrementCommitCount(agentId)
 
-    console.log('Commit tracked:', commitData)
+    await this.client.app.log({ body: { message: 'Commit tracked', commitHash: commitData.commit_hash } })
   }
 
   async recordCommunicationScore(agentId: string, commitHash: string, projectPath: string, grade: -1 | 1 | 2): Promise<void> {
@@ -93,7 +93,7 @@ export class TrackingService {
     
     await this.updateCommunicationScore(agentId, totalScore)
 
-    console.log('Communication score recorded:', event)
+    await this.client.app.log({ body: { message: 'Communication score recorded', agentId: event.agent_id, grade: event.grade } })
   }
 
   async initializeSessionTracking(session: any): Promise<void> {
@@ -107,7 +107,7 @@ export class TrackingService {
       agent = await this.createAgent(agentId, session)
     }
 
-    console.log('Session tracking initialized for agent:', agentId)
+    await this.client.app.log({ body: { message: 'Session tracking initialized', agentId } })
   }
 
   async generateRetrospective(session: any): Promise<void> {
@@ -126,7 +126,7 @@ export class TrackingService {
       }
     })
 
-    console.log('Retrospective generated for session:', session.id)
+    await this.client.app.log({ body: { message: 'Retrospective generated', sessionId: session.id } })
   }
 
   async finalizeSession(session: any): Promise<void> {
@@ -135,7 +135,7 @@ export class TrackingService {
     const agentId = this.getAgentIdFromSession(session)
     if (!agentId) return
 
-    console.log('Session finalized:', session.id)
+    await this.client.app.log({ body: { message: 'Session finalized', sessionId: session.id } })
   }
 
   private async incrementXP(agentId: string, xp: number): Promise<void> {

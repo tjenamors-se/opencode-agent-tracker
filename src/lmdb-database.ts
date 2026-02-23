@@ -17,7 +17,7 @@ export class LMDBDatabase {
       })
       return true
     } catch (error) {
-      console.error('LMDB initialization failed:', error)
+      // LMDB initialization failed, gracefully degrade
       return false
     }
   }
@@ -33,7 +33,6 @@ export class LMDBDatabase {
       await this.db!.put(`agent:${agentId}`, data)
       return true
     } catch (error) {
-      console.error('Failed to put agent data:', error)
       return false
     }
   }
@@ -44,7 +43,6 @@ export class LMDBDatabase {
     try {
       return await this.db!.get(`agent:${agentId}`)
     } catch (error) {
-      console.error('Failed to get agent data:', error)
       return null
     }
   }
@@ -56,7 +54,6 @@ export class LMDBDatabase {
       await this.db!.put(`commit:${projectPath}:${commitHash}`, data)
       return true
     } catch (error) {
-      console.error('Failed to put commit data:', error)
       return false
     }
   }
@@ -67,7 +64,6 @@ export class LMDBDatabase {
     try {
       return await this.db!.get(`commit:${projectPath}:${commitHash}`)
     } catch (error) {
-      console.error('Failed to get commit data:', error)
       return null
     }
   }
@@ -80,7 +76,6 @@ export class LMDBDatabase {
       await this.db!.put(`communication:${eventId}`, event)
       return true
     } catch (error) {
-      console.error('Failed to put communication event:', error)
       return false
     }
   }
@@ -103,7 +98,6 @@ export class LMDBDatabase {
       
       return events
     } catch (error) {
-      console.error('Failed to get communication events:', error)
       return []
     }
   }
