@@ -19,7 +19,10 @@
     "name": "agent-tracker"
   },
   "files": [
-    "dist"
+    "dist",
+    "skills",
+    "agents",
+    "scripts/postinstall.mjs"
   ],
   "scripts": {
     "build": "tsc",
@@ -31,7 +34,8 @@
     "clean": "rm -rf dist coverage",
     "prepack": "npm run build",
     "setup-local": "node scripts/setup-local-teste.js",
-    "test-local": "node test-local-setup.mjs"
+    "test-local": "node test-local-setup.mjs",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "dependencies": {
     "lmdb": "^3.5.1"
