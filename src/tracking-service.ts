@@ -1,80 +1,111 @@
-import type { AgentData, CommitData, CommunicationScoreEvent } from './types.js'
 import type { Database } from './database.js'
-
-interface ToolUsageEvent {
-  agentId: string
-  tool: string
-  success: boolean
-  timestamp: Date
-}
-
-// interface SessionData {
-//   id: string
-//   agentIds: string[]
-//   startTime: Date
-//   endTime?: Date
-// }
+import type { WriteBuffer } from './write-buffer.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, Grade, AgentStatus, RetrospectiveEntry, ActivityEntry, FlushResult } from './types.js'
 
 export class TrackingService {
+  private agentCache: Map<string, AgentData> = new Map()
+
   constructor(
-    private db: LMDBDatabase,
+    private db: Database,
+    private writeBuffer: WriteBuffer,
     private client: any
   ) {}
 
+  /**
+   * Reads agent from cache or database. Reads are free (memory-mapped).
+   */
+  private async getOrReadAgent(agentId: string): Promise<AgentData | null> {
+    const cached = this.agentCache.get(agentId)
+    if (cached) return cached
+
+    const agent = await this.db.getAgent(agentId)
+    if (agent) {
+      const clone = { ...agent }
+      this.agentCache.set(agentId, clone)
+      return clone
+    }
+    return agent
+  }
+
+  /**
+   * Mutates agent in memory and buffers for later flush.
+   */
+  private bufferAgentUpdate(agent: AgentData): void {
+    agent.updated_at = new Date()
+    this.agentCache.set(agent.id, agent)
+    this.writeBuffer.bufferAgent(agent.id, agent)
+  }
+
   async trackToolUsage(input: any, output: any): Promise<void> {
     if (!this.db.isAvailable) return
-    
+
     const agentId = this.getAgentId(input)
     if (!agentId) return
 
-    const event: ToolUsageEvent = {
-      agentId,
-      tool: input.tool,
-      success: output.success,
-      timestamp: new Date()
-    }
-
-    // Increment XP for successful tool usage
     if (output.success) {
-      await this.incrementXP(agentId, 1)
+      const agent = await this.getOrReadAgent(agentId)
+      if (agent) {
+        agent.experience_points += 1
+        this.bufferAgentUpdate(agent)
+      }
     }
 
-    await this.client.app.log({ body: { message: 'Tool usage tracked', agentId: event.agentId } })
+    await this.client.app.log({ body: { message: 'Tool usage tracked', agentId } })
   }
 
   async trackCommandCompletion(event: any): Promise<void> {
     if (!this.db.isAvailable) return
-    
+
     const agentId = this.getAgentIdFromCommand(event)
     if (!agentId) return
 
-    // Increment XP for successful command execution
     if (event.success) {
-      await this.incrementXP(agentId, 2)
+      const agent = await this.getOrReadAgent(agentId)
+      if (agent) {
+        agent.experience_points += 2
+        this.bufferAgentUpdate(agent)
+      }
     }
   }
 
   async commitCompleted(agentId: string, commitHash: string, projectPath: string, taskDescription: string): Promise<void> {
     if (!this.db.isAvailable) return
 
+    const agent = await this.getOrReadAgent(agentId)
+    if (!agent) return
+
     const commitData: CommitData = {
       agent_id: agentId,
       commit_hash: commitHash,
       project_path: projectPath,
       task_description: taskDescription,
-      experience_gained: 5, // Base XP for commit completion
-      communication_score_change: 0, // Will be updated by retrospective
+      experience_gained: 5,
+      communication_score_change: 0,
       timestamp: new Date()
     }
 
-    await this.db.putCommit(projectPath, commitHash, commitData)
-    await this.incrementXP(agentId, commitData.experience_gained)
-    await this.incrementCommitCount(agentId)
+    this.writeBuffer.bufferCommit(projectPath, commitHash, commitData)
 
-    await this.client.app.log({ body: { message: 'Commit tracked', commitHash: commitData.commit_hash } })
+    agent.experience_points += commitData.experience_gained
+    agent.total_commits += 1
+
+    const neededForNextLevel = 10000 * agent.skill_points
+    if (agent.experience_points >= neededForNextLevel) {
+      agent.skill_points += 1
+      agent.experience_points = 0
+
+      await this.client.tui.toast.show({
+        message: `Agent ${agentId} leveled up to SP ${agent.skill_points}!`,
+        variant: 'success'
+      })
+    }
+
+    this.bufferAgentUpdate(agent)
+
+    await this.client.app.log({ body: { message: 'Commit tracked', commitHash } })
   }
 
-  async recordCommunicationScore(agentId: string, commitHash: string, projectPath: string, grade: -1 | 1 | 2): Promise<void> {
+  async recordCommunicationScore(agentId: string, commitHash: string, projectPath: string, grade: Grade): Promise<void> {
     if (!this.db.isAvailable) return
 
     const event: CommunicationScoreEvent = {
@@ -85,15 +116,15 @@ export class TrackingService {
       timestamp: new Date()
     }
 
-    await this.db.putCommunicationEvent(event)
+    this.writeBuffer.bufferCommunicationEvent(event)
 
-    // Aggregate the communication score
-    const events = await this.db.getCommunicationEvents(agentId, 100)
-    const totalScore = events.reduce((sum, e) => sum + e.grade, 0)
-    
-    await this.updateCommunicationScore(agentId, totalScore)
+    const agent = await this.getOrReadAgent(agentId)
+    if (agent) {
+      agent.communication_score = Math.max(0, agent.communication_score + grade)
+      this.bufferAgentUpdate(agent)
+    }
 
-    await this.client.app.log({ body: { message: 'Communication score recorded', agentId: event.agent_id, grade: event.grade } })
+    await this.client.app.log({ body: { message: 'Communication score recorded', agentId, grade } })
   }
 
   async initializeSessionTracking(session: any): Promise<void> {
@@ -102,9 +133,11 @@ export class TrackingService {
     const agentId = this.getAgentIdFromSession(session)
     if (!agentId) return
 
-    let agent = await this.db.getAgent(agentId)
+    let agent = await this.getOrReadAgent(agentId)
     if (!agent) {
-      agent = await this.createAgent(agentId, session)
+      agent = this.createAgentData(agentId, session)
+      this.agentCache.set(agentId, agent)
+      this.writeBuffer.bufferAgent(agentId, agent)
     }
 
     await this.client.app.log({ body: { message: 'Session tracking initialized', agentId } })
@@ -116,7 +149,6 @@ export class TrackingService {
     const agentId = this.getAgentIdFromSession(session)
     if (!agentId) return
 
-    // Generate mini-retrospective
     await this.client.app.log({
       body: {
         service: 'agent-tracker',
@@ -135,67 +167,123 @@ export class TrackingService {
     const agentId = this.getAgentIdFromSession(session)
     if (!agentId) return
 
+    await this.flushWriteBuffer()
+
     await this.client.app.log({ body: { message: 'Session finalized', sessionId: session.id } })
   }
 
-  private async incrementXP(agentId: string, xp: number): Promise<void> {
-    const agent = await this.db.getAgent(agentId)
+  /**
+   * Flushes all buffered writes to the database (R6).
+   */
+  async flushWriteBuffer(): Promise<FlushResult> {
+    const result = await this.writeBuffer.flush(this.db)
+    this.agentCache.clear()
+    return result
+  }
+
+  /**
+   * Returns current agent status (R8.1).
+   */
+  async getAgentStatus(agentId: string): Promise<AgentStatus | null> {
+    const agent = await this.getOrReadAgent(agentId)
+    if (!agent) return null
+
+    return {
+      id: agent.id,
+      skill_points: agent.skill_points,
+      experience_points: agent.experience_points,
+      communication_score: agent.communication_score,
+      total_commits: agent.total_commits,
+      total_bugs: agent.total_bugs,
+      halted: agent.skill_points <= 0,
+      active: agent.active
+    }
+  }
+
+  /**
+   * Reports a bug against an agent -- decrements SP (R8.1).
+   */
+  async reportBug(agentId: string): Promise<void> {
+    const agent = await this.getOrReadAgent(agentId)
     if (!agent) return
 
-    agent.experience_points += xp
-    agent.updated_at = new Date()
+    agent.skill_points -= 1
+    agent.total_bugs += 1
 
-    // Check for level up
+    if (agent.skill_points <= 0) {
+      agent.active = false
+      await this.client.tui.toast.show({
+        message: `Agent ${agentId} halted: SP reached ${agent.skill_points}`,
+        variant: 'error'
+      })
+    }
+
+    this.bufferAgentUpdate(agent)
+  }
+
+  /**
+   * Records both agent and user grades for a commit (R8.2).
+   */
+  async recordCommitGrade(agentId: string, commitHash: string, projectPath: string, agentGrade: Grade, userGrade: Grade): Promise<void> {
+    const agent = await this.getOrReadAgent(agentId)
+    if (!agent) return
+
+    const scoreBefore = agent.communication_score
+    agent.communication_score = Math.max(0, agent.communication_score + agentGrade + userGrade)
+    agent.experience_points += 1
+
     const neededForNextLevel = 10000 * agent.skill_points
     if (agent.experience_points >= neededForNextLevel) {
       agent.skill_points += 1
       agent.experience_points = 0
-      
-      await this.client.tui.toast.show({
-        message: `Agent ${agentId} leveled up to SP ${agent.skill_points}!`,
-        variant: 'success'
-      })
     }
 
-    await this.db.putAgent(agentId, agent)
+    this.bufferAgentUpdate(agent)
+
+    const entry: RetrospectiveEntry = {
+      commit: commitHash,
+      timestamp: new Date().toISOString(),
+      task: '',
+      agent_grade: agentGrade,
+      user_grade: userGrade,
+      score_before: scoreBefore,
+      score_after: agent.communication_score,
+      agent_note: '',
+      user_note: ''
+    }
+
+    this.writeBuffer.bufferRetrospective(agentId, commitHash, entry)
   }
 
-  private async incrementCommitCount(agentId: string): Promise<void> {
-    const agent = await this.db.getAgent(agentId)
-    if (!agent) return
-
-    agent.total_commits += 1
-    agent.updated_at = new Date()
-    await this.db.putAgent(agentId, agent)
+  /**
+   * Records a retrospective entry (R8.2).
+   */
+  async recordRetrospective(agentId: string, entry: RetrospectiveEntry): Promise<void> {
+    this.writeBuffer.bufferRetrospective(agentId, entry.commit, entry)
   }
 
-  private async updateCommunicationScore(agentId: string, score: number): Promise<void> {
-    const agent = await this.db.getAgent(agentId)
-    if (!agent) return
-
-    agent.communication_score = Math.max(0, score)
-    agent.updated_at = new Date()
-    await this.db.putAgent(agentId, agent)
+  /**
+   * Logs an activity journal entry (R8.3).
+   */
+  async logActivity(agentId: string, entry: ActivityEntry): Promise<void> {
+    this.writeBuffer.bufferActivity(agentId, entry)
   }
 
-  private async createAgent(agentId: string, session: any): Promise<AgentData> {
-    const agent: AgentData = {
+  private createAgentData(agentId: string, session: any): AgentData {
+    return {
       id: agentId,
       name: agentId,
       model: session?.model || 'unknown',
       scope: session?.scope || 'unknown',
       skill_points: 1,
       experience_points: 0,
-      communication_score: 0,
+      communication_score: 60,
       total_commits: 0,
       total_bugs: 0,
       active: true,
       created_at: new Date(),
       updated_at: new Date()
     }
-
-    await this.db.putAgent(agentId, agent)
-    return agent
   }
 
   private getAgentId(input: any): string | null {
