@@ -1,8 +1,8 @@
 import { open, RootDatabase } from 'lmdb'
 import { join } from 'path'
-import { existsSync, rmSync } from 'fs'
+import { existsSync, rmSync, statSync, readFileSync } from 'fs'
 import type { Database } from './database.js'
-import type { MigrationResult, AgentData, CommitData, CommunicationScoreEvent } from './types.js'
+import type { MigrationResult, MigrationRecord, AgentData, CommitData, CommunicationScoreEvent } from './types.js'
 
 /**
  * The old buggy code used raw '~' in the path string, which Node.js does not
@@ -14,9 +14,65 @@ import type { MigrationResult, AgentData, CommitData, CommunicationScoreEvent } 
 const OLD_DB_RELATIVE_PATH = join('~', '.config', 'opencode', 'agent-tracker.lmdb')
 
 /**
+ * Detection result for an old per-project database.
+ */
+export interface DetectionResult {
+  tildeExists: boolean
+  hasLmdb: boolean
+  alreadyMigrated: boolean
+  lmdbPath: string
+}
+
+/**
+ * Reads the package version from package.json.
+ * Uses __dirname (available in CJS and babel-transformed ESM).
+ */
+function getPackageVersion(): string {
+  try {
+    const pkgPath = join(__dirname, '..', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
+    return pkg.version
+  } catch {
+    return 'unknown'
+  }
+}
+
+/**
+ * Detects whether an old per-project database exists at the given directory.
+ * Checks the LMDB migration sub-db to see if this directory was already migrated.
+ *
+ * @param sourceDir - Project directory to check
+ * @param targetDb - Central database to check for existing migration record
+ * @returns Detection result with existence, LMDB presence, and migration status
+ */
+export async function detectOldDatabase(
+  sourceDir: string,
+  targetDb: Database
+): Promise<DetectionResult> {
+  const tildeDir = join(sourceDir, '~')
+  const lmdbPath = join(sourceDir, OLD_DB_RELATIVE_PATH)
+
+  const tildeExists = existsSync(tildeDir)
+
+  if (!tildeExists) {
+    return { tildeExists: false, hasLmdb: false, alreadyMigrated: false, lmdbPath }
+  }
+
+  const hasLmdb = existsSync(lmdbPath) && !statSync(lmdbPath).isDirectory()
+
+  let alreadyMigrated = false
+  if (targetDb.isAvailable) {
+    const record = await targetDb.getMigration(sourceDir)
+    alreadyMigrated = record !== null
+  }
+
+  return { tildeExists, hasLmdb, alreadyMigrated, lmdbPath }
+}
+
+/**
  * Migrates data from a per-project database (old prefix-based format)
  * to the centralized sub-database architecture (R4).
- * After successful migration, removes the old ./~ directory tree.
+ * After successful migration, stores a migration record and removes the old ./~ directory tree.
  *
  * @param sourceDir - Project directory where old DB may exist
  * @param targetDb - Central database implementing the Database interface
@@ -77,10 +133,28 @@ export async function migrateFromProjectDatabase(
   }
 
   if (migrationSucceeded) {
+    await storeMigrationRecord(sourceDir, result.entriesMigrated, targetDb)
     cleanupOldDatabase(sourceDir, result)
   }
 
   return result
+}
+
+/**
+ * Stores a migration record in the central database after successful migration.
+ */
+async function storeMigrationRecord(
+  sourceDir: string,
+  entriesMigrated: number,
+  targetDb: Database
+): Promise<void> {
+  const record: MigrationRecord = {
+    sourcePath: sourceDir,
+    version: getPackageVersion(),
+    timestamp: new Date(),
+    entriesMigrated
+  }
+  await targetDb.putMigration(sourceDir, record)
 }
 
 /**

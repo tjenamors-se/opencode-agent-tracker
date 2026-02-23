@@ -1,5 +1,5 @@
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry, MigrationRecord } from './types.js'
 
 export class MockDatabase implements Database {
   private agents: Map<string, AgentData> = new Map()
@@ -7,6 +7,7 @@ export class MockDatabase implements Database {
   private communicationEvents: CommunicationScoreEvent[] = []
   private retrospectives: Map<string, RetrospectiveEntry> = new Map()
   private activities: Map<string, ActivityEntry> = new Map()
+  private migrations: Map<string, MigrationRecord> = new Map()
   public isAvailable: boolean = true
 
   constructor() {
@@ -83,6 +84,17 @@ export class MockDatabase implements Database {
     return entries
   }
 
+  async putMigration(sourceDir: string, record: MigrationRecord): Promise<boolean> {
+    if (!this.isAvailable) return false
+    this.migrations.set(sourceDir, record)
+    return true
+  }
+
+  async getMigration(sourceDir: string): Promise<MigrationRecord | null> {
+    if (!this.isAvailable) return null
+    return this.migrations.get(sourceDir) ?? null
+  }
+
   async close(): Promise<void> {
     this.isAvailable = false
   }
@@ -97,5 +109,6 @@ export class MockDatabase implements Database {
     this.communicationEvents = []
     this.retrospectives.clear()
     this.activities.clear()
+    this.migrations.clear()
   }
 }

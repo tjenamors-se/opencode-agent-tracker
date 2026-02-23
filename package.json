@@ -1,6 +1,6 @@
 {
   "name": "@tjenamors.se/opencode-agent-tracker",
-  "version": "0.0.0-alpha-dev",
+  "version": "0.0.1",
   "description": "High-performance agent tracking for OpenCode using LMDB",
   "license": "GPL-3.0-or-later",
   "type": "module",

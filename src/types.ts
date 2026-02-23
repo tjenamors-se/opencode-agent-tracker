@@ -88,6 +88,14 @@ export interface AgentStatus {
 }
 
 /** Result of a migration operation (R4) */
+/** Record stored in LMDB after a successful migration (R4) */
+export interface MigrationRecord {
+  sourcePath: string
+  version: string
+  timestamp: Date
+  entriesMigrated: number
+}
+
 export interface MigrationResult {
   entriesMigrated: number
   entriesSkipped: number

@@ -313,3 +313,144 @@ describe('migrateFromProjectDatabase', () => {
     expect(existsSync(oldRoot)).toBe(true);
   });
 });
+
+describe('detectOldDatabase', () => {
+  const { detectOldDatabase } = require('../../src/migration');
+  let targetDb: MockDatabase;
+  let tempDir: string;
+
+  beforeEach(() => {
+    targetDb = new MockDatabase();
+    tempDir = join(tmpdir(), `detect-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tempDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should return tildeExists=false when no ./~ directory', async () => {
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(false);
+    expect(result.hasLmdb).toBe(false);
+    expect(result.alreadyMigrated).toBe(false);
+  });
+
+  it('should return hasLmdb=true when LMDB file exists in ./~', async () => {
+    const sourceDbPath = join(tempDir, '~', '.config', 'opencode', 'agent-tracker.lmdb');
+    mkdirSync(dirname(sourceDbPath), { recursive: true });
+    const db = open({ path: sourceDbPath });
+    db.close();
+
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(true);
+    expect(result.hasLmdb).toBe(true);
+    expect(result.alreadyMigrated).toBe(false);
+  });
+
+  it('should return hasLmdb=false when ./~ exists but no LMDB file', async () => {
+    mkdirSync(join(tempDir, '~', 'something'), { recursive: true });
+
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(true);
+    expect(result.hasLmdb).toBe(false);
+    expect(result.alreadyMigrated).toBe(false);
+  });
+
+  it('should return hasLmdb=false when LMDB path is a directory', async () => {
+    const lmdbDir = join(tempDir, '~', '.config', 'opencode', 'agent-tracker.lmdb');
+    mkdirSync(lmdbDir, { recursive: true });
+
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(true);
+    expect(result.hasLmdb).toBe(false);
+    expect(result.alreadyMigrated).toBe(false);
+  });
+
+  it('should return alreadyMigrated=true when migration record exists', async () => {
+    mkdirSync(join(tempDir, '~'), { recursive: true });
+    await targetDb.putMigration(tempDir, {
+      sourcePath: tempDir,
+      version: '0.0.1',
+      timestamp: new Date(),
+      entriesMigrated: 3
+    });
+
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(true);
+    expect(result.alreadyMigrated).toBe(true);
+  });
+
+  it('should return alreadyMigrated=false when db is unavailable', async () => {
+    mkdirSync(join(tempDir, '~'), { recursive: true });
+    targetDb.setAvailable(false);
+
+    const result = await detectOldDatabase(tempDir, targetDb);
+
+    expect(result.tildeExists).toBe(true);
+    expect(result.alreadyMigrated).toBe(false);
+  });
+});
+
+describe('migration record storage', () => {
+  let targetDb: MockDatabase;
+  let tempDir: string;
+
+  beforeEach(() => {
+    targetDb = new MockDatabase();
+    tempDir = join(tmpdir(), `record-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should store migration record after successful migration', async () => {
+    const sourceDbPath = join(tempDir, '~', '.config', 'opencode', 'agent-tracker.lmdb');
+    mkdirSync(dirname(sourceDbPath), { recursive: true });
+    const db = open({ path: sourceDbPath });
+    db.putSync('agent:record-test-agent', {
+      id: 'record-test-agent',
+      name: 'Test',
+      model: 'test',
+      scope: 'test',
+      skill_points: 1,
+      experience_points: 0,
+      communication_score: 60,
+      total_commits: 0,
+      total_bugs: 0,
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    db.close();
+
+    await migrateFromProjectDatabase(tempDir, targetDb);
+
+    const record = await targetDb.getMigration(tempDir);
+    expect(record).not.toBeNull();
+    expect(record?.sourcePath).toBe(tempDir);
+    expect(record?.entriesMigrated).toBe(1);
+    expect(record?.version).toBeDefined();
+    expect(record?.timestamp).toBeDefined();
+  });
+
+  it('should not store migration record when migration fails', async () => {
+    targetDb.setAvailable(false);
+
+    await migrateFromProjectDatabase(tempDir, targetDb);
+
+    targetDb.setAvailable(true);
+    const record = await targetDb.getMigration(tempDir);
+    expect(record).toBeNull();
+  });
+});

@@ -4,10 +4,10 @@ import { TrackingService } from './tracking-service.js'
 import { WriteBuffer } from './write-buffer.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
-import { migrateFromProjectDatabase } from './migration.js'
+import { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
 import type { PluginConfig, DatabaseConfig } from './types.js'
 
-export { migrateFromProjectDatabase } from './migration.js'
+export { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
 
 /**
  * Resolves PluginConfig to DatabaseConfig for LMDBDatabase constructor.
@@ -47,6 +47,74 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
       }
     }
   })
+
+  /**
+   * Auto-migrates old per-project database on session start.
+   * - If ./~ has an LMDB file and not yet migrated: auto-migrate
+   * - If ./~ exists but no LMDB file: warn user (something else created it)
+   * - If already migrated or no ./~: no-op
+   */
+  async function autoMigrate(): Promise<void> {
+    try {
+      const detection = await detectOldDatabase(directory, db)
+
+      if (!detection.tildeExists) {
+        return
+      }
+
+      if (detection.alreadyMigrated) {
+        return
+      }
+
+      if (detection.hasLmdb) {
+        const result = await migrateFromProjectDatabase(directory, db)
+
+        await client.app.log({
+          body: {
+            service: 'agent-tracker',
+            level: 'info',
+            message: `Auto-migration completed: ${result.entriesMigrated} migrated, ${result.entriesSkipped} skipped`,
+            extra: { sourceDir: directory, errors: result.errors }
+          }
+        })
+
+        if (result.errors.length > 0) {
+          await client.tui.toast.show({
+            message: `Migration completed with ${result.errors.length} error(s). Check logs.`,
+            variant: 'warning'
+          })
+        } else {
+          await client.tui.toast.show({
+            message: `Migrated ${result.entriesMigrated} entries from old database. Old ./~ removed.`,
+            variant: 'info'
+          })
+        }
+      } else {
+        await client.tui.toast.show({
+          message: 'Found ./~ directory but no agent-tracker database inside. This may have been created by something else. Please inspect and remove manually if not needed.',
+          variant: 'warning'
+        })
+
+        await client.app.log({
+          body: {
+            service: 'agent-tracker',
+            level: 'warning',
+            message: 'Found ./~ directory without LMDB database — not auto-migrating',
+            extra: { sourceDir: directory, tildeDir: detection.lmdbPath }
+          }
+        })
+      }
+    } catch (error) {
+      await client.app.log({
+        body: {
+          service: 'agent-tracker',
+          level: 'error',
+          message: `Auto-migration failed: ${String(error)}`,
+          extra: { sourceDir: directory }
+        }
+      }).catch(() => {})
+    }
+  }
 
   return {
     tool: {
@@ -97,6 +165,7 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
     'session.created': async (session: any) => {
       await dependencyChecker.validate()
       await trackingService.initializeSessionTracking(session)
+      await autoMigrate()
     },
 
     'session.idle': async (session: any) => {

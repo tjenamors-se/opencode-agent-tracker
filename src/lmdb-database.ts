@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { join, isAbsolute, dirname } from 'path'
 import { mkdirSync } from 'fs'
 import type { Database } from './database.js'
-import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, DatabaseConfig, RetrospectiveEntry, ActivityEntry, MigrationRecord } from './types.js'
 
 const DEFAULT_PATH = join(homedir(), '.config', 'opencode', 'agent-tracker.lmdb')
 const DEFAULT_MAP_SIZE = 512 * 1024 * 1024 // 512 MB
@@ -17,6 +17,7 @@ export class LMDBDatabase implements Database {
   private communicationDB: LMDBStore | null = null
   private retrospectivesDB: LMDBStore | null = null
   private activitiesDB: LMDBStore | null = null
+  private migrationsDB: LMDBStore | null = null
   private available: boolean = false
 
   constructor(config: DatabaseConfig | string = {}) {
@@ -90,6 +91,9 @@ export class LMDBDatabase implements Database {
       })
       this.activitiesDB = this.root.openDB('activities', {
         sharedStructuresKey: Symbol.for('structures:activities')
+      })
+      this.migrationsDB = this.root.openDB('migrations', {
+        sharedStructuresKey: Symbol.for('structures:migrations')
       })
 
       return true
@@ -219,17 +223,39 @@ export class LMDBDatabase implements Database {
     }
   }
 
+  async putMigration(sourceDir: string, record: MigrationRecord): Promise<boolean> {
+    if (!this.isAvailable || !this.migrationsDB) return false
+    try {
+      await this.migrationsDB.put(sourceDir, record)
+      return true
+    } catch (_error) {
+      return false
+    }
+  }
+
+  async getMigration(sourceDir: string): Promise<MigrationRecord | null> {
+    if (!this.isAvailable || !this.migrationsDB) return null
+    try {
+      const result = this.migrationsDB.get(sourceDir) as MigrationRecord | undefined
+      return result ?? null
+    } catch (_error) {
+      return null
+    }
+  }
+
   async close(): Promise<void> {
     try { if (this.agentsDB) await this.agentsDB.close() } catch (_e) { /* already closed */ }
     try { if (this.commitsDB) await this.commitsDB.close() } catch (_e) { /* already closed */ }
     try { if (this.communicationDB) await this.communicationDB.close() } catch (_e) { /* already closed */ }
     try { if (this.retrospectivesDB) await this.retrospectivesDB.close() } catch (_e) { /* already closed */ }
     try { if (this.activitiesDB) await this.activitiesDB.close() } catch (_e) { /* already closed */ }
+    try { if (this.migrationsDB) await this.migrationsDB.close() } catch (_e) { /* already closed */ }
     this.agentsDB = null
     this.commitsDB = null
     this.communicationDB = null
     this.retrospectivesDB = null
     this.activitiesDB = null
+    this.migrationsDB = null
     try { if (this.root) await this.root.close() } catch (_e) { /* already closed */ }
     this.root = null
     this.available = false
