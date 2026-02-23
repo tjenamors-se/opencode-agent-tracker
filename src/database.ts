@@ -1,4 +1,4 @@
-import type { AgentData, CommitData, CommunicationScoreEvent } from './types.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry } from './types.js'
 
 export interface Database {
   isAvailable: boolean
@@ -7,6 +7,10 @@ export interface Database {
   putCommit(projectPath: string, commitHash: string, data: CommitData): Promise<boolean>
   getCommit(projectPath: string, commitHash: string): Promise<CommitData | null>
   putCommunicationEvent(event: CommunicationScoreEvent): Promise<boolean>
-  getCommunicationEvents(agentId: string, limit: number): Promise<CommunicationScoreEvent[]>
+  getCommunicationEvents(agentId: string, limit?: number): Promise<CommunicationScoreEvent[]>
+  putRetrospective(agentId: string, commitHash: string, entry: RetrospectiveEntry): Promise<boolean>
+  getRetrospectives(agentId: string, limit?: number): Promise<RetrospectiveEntry[]>
+  putActivity(agentId: string, entry: ActivityEntry): Promise<boolean>
+  getActivities(agentId: string, limit?: number): Promise<ActivityEntry[]>
   close(): Promise<void>
 }
