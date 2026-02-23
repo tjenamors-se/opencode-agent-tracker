@@ -1,6 +1,6 @@
 import { open, RootDatabase } from 'lmdb'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, rmSync } from 'fs'
 import type { Database } from './database.js'
 import type { MigrationResult, AgentData, CommitData, CommunicationScoreEvent } from './types.js'
 
@@ -16,6 +16,7 @@ const OLD_DB_RELATIVE_PATH = join('~', '.config', 'opencode', 'agent-tracker.lmd
 /**
  * Migrates data from a per-project database (old prefix-based format)
  * to the centralized sub-database architecture (R4).
+ * After successful migration, removes the old ./~ directory tree.
  *
  * @param sourceDir - Project directory where old DB may exist
  * @param targetDb - Central database implementing the Database interface
@@ -43,6 +44,7 @@ export async function migrateFromProjectDatabase(
   }
 
   let sourceDb: RootDatabase | null = null
+  let migrationSucceeded = false
 
   try {
     sourceDb = open({
@@ -60,6 +62,8 @@ export async function migrateFromProjectDatabase(
         result.errors.push(`Failed to migrate key "${keyStr}": ${String(error)}`)
       }
     }
+
+    migrationSucceeded = true
   } catch (error) {
     result.errors.push(`Migration failed: ${String(error)}`)
   } finally {
@@ -72,7 +76,24 @@ export async function migrateFromProjectDatabase(
     }
   }
 
+  if (migrationSucceeded) {
+    cleanupOldDatabase(sourceDir, result)
+  }
+
   return result
+}
+
+/**
+ * Removes the old ./~ directory tree after a successful migration.
+ * Errors during cleanup are recorded but do not fail the migration.
+ */
+function cleanupOldDatabase(sourceDir: string, result: MigrationResult): void {
+  const oldRoot = join(sourceDir, '~')
+  try {
+    rmSync(oldRoot, { recursive: true, force: true })
+  } catch (error) {
+    result.errors.push(`Failed to remove old database directory "${oldRoot}": ${String(error)}`)
+  }
 }
 
 /**

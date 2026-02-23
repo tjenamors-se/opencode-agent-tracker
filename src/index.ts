@@ -4,7 +4,10 @@ import { TrackingService } from './tracking-service.js'
 import { WriteBuffer } from './write-buffer.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
+import { migrateFromProjectDatabase } from './migration.js'
 import type { PluginConfig, DatabaseConfig } from './types.js'
+
+export { migrateFromProjectDatabase } from './migration.js'
 
 /**
  * Resolves PluginConfig to DatabaseConfig for LMDBDatabase constructor.
@@ -46,6 +49,35 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
   })
 
   return {
+    tool: {
+      'migrate-agent-tracker': {
+        description: 'Migrate agent tracking data from old per-project database (./~) to the centralized database. Removes the old ./~ directory after successful migration.',
+        args: {},
+        async execute(_args: Record<string, never>, ctx: { directory: string }) {
+          const sourceDir = ctx.directory
+          const result = await migrateFromProjectDatabase(sourceDir, db)
+
+          const lines: string[] = []
+          lines.push(`Migration from ${sourceDir}:`)
+          lines.push(`  Entries migrated: ${result.entriesMigrated}`)
+          lines.push(`  Entries skipped: ${result.entriesSkipped}`)
+
+          if (result.errors.length > 0) {
+            lines.push(`  Errors (${result.errors.length}):`)
+            for (const err of result.errors) {
+              lines.push(`    - ${err}`)
+            }
+          }
+
+          if (result.entriesMigrated === 0 && result.entriesSkipped === 0 && result.errors.length === 0) {
+            lines.push('  No old database found at this location.')
+          }
+
+          return lines.join('\n')
+        }
+      }
+    },
+
     'tool.execute.before': async (input) => {
       await envProtection.handleToolBefore(input)
     },

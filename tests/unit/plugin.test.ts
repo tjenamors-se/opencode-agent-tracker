@@ -33,6 +33,16 @@ describe('AgentTrackerPlugin', () => {
     expect(plugin['event']).toBeDefined();
   });
 
+  it('should expose migrate-agent-tracker custom tool', async () => {
+    const ctx = makeMockContext();
+    const plugin: Plugin = await AgentTrackerPlugin(ctx as any);
+
+    expect(plugin['tool']).toBeDefined();
+    expect(plugin['tool']!['migrate-agent-tracker']).toBeDefined();
+    expect(typeof plugin['tool']!['migrate-agent-tracker'].execute).toBe('function');
+    expect(plugin['tool']!['migrate-agent-tracker'].description).toContain('Migrate agent tracking data');
+  });
+
   it('should pass plugin config to database', async () => {
     const ctx = makeMockContext({
       $: {

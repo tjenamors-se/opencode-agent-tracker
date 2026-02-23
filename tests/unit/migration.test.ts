@@ -44,7 +44,7 @@ describe('migrateFromProjectDatabase', () => {
     expect(result.errors).toEqual([]);
   });
 
-  it('should migrate agent entries', async () => {
+  it('should migrate agent entries and remove old directory', async () => {
     const agentData: AgentData = {
       id: 'migrate-agent-1',
       name: 'Migrated Agent',
@@ -62,6 +62,9 @@ describe('migrateFromProjectDatabase', () => {
 
     createSourceDb({ 'agent:migrate-agent-1': agentData });
 
+    const oldRoot = join(tempDir, '~');
+    expect(existsSync(oldRoot)).toBe(true);
+
     const result = await migrateFromProjectDatabase(tempDir, targetDb);
 
     expect(result.entriesMigrated).toBe(1);
@@ -71,6 +74,8 @@ describe('migrateFromProjectDatabase', () => {
     const stored = await targetDb.getAgent('migrate-agent-1');
     expect(stored?.id).toBe('migrate-agent-1');
     expect(stored?.skill_points).toBe(2);
+
+    expect(existsSync(oldRoot)).toBe(false);
   });
 
   it('should migrate commit entries', async () => {
@@ -91,6 +96,8 @@ describe('migrateFromProjectDatabase', () => {
     expect(result.entriesMigrated).toBe(1);
     const stored = await targetDb.getCommit('/project', 'abc123');
     expect(stored?.task_description).toBe('Test task');
+
+    expect(existsSync(join(tempDir, '~'))).toBe(false);
   });
 
   it('should migrate communication events', async () => {
@@ -157,9 +164,11 @@ describe('migrateFromProjectDatabase', () => {
     expect(result.entriesMigrated).toBe(3);
     expect(result.entriesSkipped).toBe(0);
     expect(result.errors).toEqual([]);
+
+    expect(existsSync(join(tempDir, '~'))).toBe(false);
   });
 
-  it('should be idempotent -- second run skips existing entries', async () => {
+  it('should be idempotent -- second run is a no-op because old DB was removed', async () => {
     const agent: AgentData = {
       id: 'idempotent-agent',
       name: 'Idempotent',
@@ -192,9 +201,12 @@ describe('migrateFromProjectDatabase', () => {
     expect(result1.entriesMigrated).toBe(2);
     expect(result1.entriesSkipped).toBe(0);
 
+    expect(existsSync(join(tempDir, '~'))).toBe(false);
+
     const result2 = await migrateFromProjectDatabase(tempDir, targetDb);
     expect(result2.entriesMigrated).toBe(0);
-    expect(result2.entriesSkipped).toBe(2);
+    expect(result2.entriesSkipped).toBe(0);
+    expect(result2.errors).toEqual([]);
   });
 
   it('should skip agents that already exist in target', async () => {
@@ -240,6 +252,8 @@ describe('migrateFromProjectDatabase', () => {
     const agent = await targetDb.getAgent('existing-agent');
     expect(agent?.skill_points).toBe(5);
     expect(agent?.name).toBe('Existing');
+
+    expect(existsSync(join(tempDir, '~'))).toBe(false);
   });
 
   it('should report error for unknown key prefixes', async () => {
@@ -272,5 +286,30 @@ describe('migrateFromProjectDatabase', () => {
     expect(result.errors[0]).toContain('Target database is not available');
   });
 
+  it('should not remove old directory when target database is unavailable', async () => {
+    const agent: AgentData = {
+      id: 'no-cleanup-agent',
+      name: 'NoCleanup',
+      model: 'test',
+      scope: 'test',
+      skill_points: 1,
+      experience_points: 0,
+      communication_score: 60,
+      total_commits: 0,
+      total_bugs: 0,
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
 
+    createSourceDb({ 'agent:no-cleanup-agent': agent });
+    targetDb.setAvailable(false);
+
+    const oldRoot = join(tempDir, '~');
+    expect(existsSync(oldRoot)).toBe(true);
+
+    await migrateFromProjectDatabase(tempDir, targetDb);
+
+    expect(existsSync(oldRoot)).toBe(true);
+  });
 });
