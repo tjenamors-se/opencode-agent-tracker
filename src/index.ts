@@ -5,7 +5,8 @@ import { WriteBuffer } from './write-buffer.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 import { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
-import type { PluginConfig, DatabaseConfig, AgentHealthStatus } from './types.js'
+import type { PluginConfig, DatabaseConfig } from './types.js'
+import { formatHealthStatus } from './health-display.js'
 
 export { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
 
@@ -23,38 +24,6 @@ function resolveDatabaseConfig(pluginConfig: PluginConfig): DatabaseConfig {
   return config
 }
 
-/**
- * Formats AgentHealthStatus into a human-readable status block for toasts/logs.
- */
-function formatHealthStatus(health: AgentHealthStatus): string {
-  const spLevelUp = (10 * health.skill_points).toFixed(1)
-  const content: string[] = []
-  const sp = health.skill_points.toFixed(1)
-  const xp = health.experience_points.toFixed(1)
-  const cs = health.communication_score.toFixed(1)
-  const commits = health.total_commits.toFixed(1)
-  const bugs = health.total_bugs.toFixed(1)
-  content.push(`Agent: ${health.agent_id}`)
-  content.push(`SP: ${sp} | XP: ${xp} | CS: ${cs}`)
-  content.push(`Commits: ${commits} | Bugs: ${bugs}`)
-  content.push(`Halted: ${health.halted ? 'YES' : 'no'}`)
-  content.push(`SP level-up at: ${spLevelUp} XP (10 * ${sp})`)
-  if (health.pending_changes.length > 0) {
-    content.push(`Pending changes (${health.pending_changes.length}):`)
-    for (const change of health.pending_changes) {
-      content.push(`  ${change}`)
-    }
-  } else {
-    content.push('Pending changes: none')
-  }
-
-  const maxLen = content.reduce((max, line) => Math.max(max, line.length), 0)
-  const top = '\u250C' + '\u2500'.repeat(maxLen + 2) + '\u2510'
-  const bottom = '\u2514' + '\u2500'.repeat(maxLen + 2) + '\u2518'
-  const padded = content.map(line => '\u2502 ' + line.padEnd(maxLen) + ' \u2502')
-
-  return [top, ...padded, bottom].join('\n')
-}
 
 const AgentTrackerPlugin: Plugin = async (context: any) => {
   const { project, client } = context
