@@ -132,6 +132,26 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
   }
 
   /**
+   * Shows agent health status box as a toast.
+   * Used on session start and after git commits/pushes.
+   */
+  async function showHealthStatus(source: any): Promise<void> {
+    const agentId = source?.agentId || source?.agent?.id || null
+    if (!agentId || !db.isAvailable) return
+
+    try {
+      const health = await trackingService.checkAgentHealth(agentId, directory)
+      const statusText = formatHealthStatus(health)
+      await client?.tui?.toast?.show({
+        message: statusText,
+        variant: health.halted ? 'error' : 'info'
+      })?.catch(() => {})
+    } catch (_error) {
+      // Status display failure must never block execution
+    }
+  }
+
+  /**
    * Auto-migrates old per-project database on session start.
    */
   async function autoMigrate(): Promise<void> {
@@ -238,6 +258,12 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
       if (output.success) {
         await trackingService.trackToolUsage(input, output)
       }
+
+      const toolName = input?.tool || ''
+      const command = input?.args?.command || ''
+      if (toolName === 'bash' && (command.includes('git commit') || command.includes('git push'))) {
+        await showHealthStatus(input)
+      }
     },
 
     'command.executed': async (event: any) => {
@@ -253,6 +279,7 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
       await trackingService.initializeSessionTracking(session)
       await autoMigrate()
       await guardAgentHealth(session)
+      await showHealthStatus(session)
     },
 
     'session.idle': async (session: any) => {
