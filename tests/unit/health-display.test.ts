@@ -40,10 +40,12 @@ describe('renderAgentName', () => {
     expect(result.split('\n').length).toBeGreaterThan(1);
   });
 
-  it('should fall back to uppercase for very long names', () => {
-    const longName = 'ThisIsAnExtremelyLongAgentNameThatExceedsSixtyColumns';
+  it('should wrap long names within 60 columns using FIGlet width option', () => {
+    const longName = 'AgentTracker-Core';
     const result = renderAgentName(longName);
-    expect(result).toBe(longName.toUpperCase());
+    const maxWidth = result.split('\n').reduce((max: number, line: string) => Math.max(max, line.length), 0);
+    expect(maxWidth).toBeLessThanOrEqual(60);
+    expect(result).toContain('___');
   });
 
   it('should produce output within 60 columns for short names', () => {

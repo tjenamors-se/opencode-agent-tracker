@@ -21,13 +21,12 @@ export function getTrustTier(sp: number): string {
  */
 export function renderAgentName(name: string): string {
   try {
-    const rendered = figlet.textSync(name, { font: 'Cybermedium' })
-    const lines = rendered.split('\n')
-    const maxLineWidth = lines.reduce((max, line) => Math.max(max, line.length), 0)
-    if (maxLineWidth <= MAX_WIDTH) {
-      return rendered
-    }
-    return name.toUpperCase()
+    const rendered = figlet.textSync(name, {
+      font: 'Cybermedium',
+      width: MAX_WIDTH,
+      whitespaceBreak: true,
+    })
+    return rendered
   } catch {
     return name.toUpperCase()
   }
