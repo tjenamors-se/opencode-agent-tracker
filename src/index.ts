@@ -57,7 +57,8 @@ function formatHealthStatus(health: AgentHealthStatus): string {
 }
 
 const AgentTrackerPlugin: Plugin = async (context: any) => {
-  const { project, client, directory } = context
+  const { project, client } = context
+  const directory: string = typeof context.directory === 'string' ? context.directory : process.cwd()
 
   const pluginConfig: PluginConfig = context.$ ?? {}
   const dbConfig = resolveDatabaseConfig(pluginConfig)

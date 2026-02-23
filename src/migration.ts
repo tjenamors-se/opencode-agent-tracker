@@ -49,6 +49,10 @@ export async function detectOldDatabase(
   sourceDir: string,
   targetDb: Database
 ): Promise<DetectionResult> {
+  if (typeof sourceDir !== 'string') {
+    return { tildeExists: false, hasLmdb: false, alreadyMigrated: false, lmdbPath: '' }
+  }
+
   const tildeDir = join(sourceDir, '~')
   const lmdbPath = join(sourceDir, OLD_DB_RELATIVE_PATH)
 
@@ -86,6 +90,11 @@ export async function migrateFromProjectDatabase(
     entriesMigrated: 0,
     entriesSkipped: 0,
     errors: []
+  }
+
+  if (typeof sourceDir !== 'string') {
+    result.errors.push('sourceDir is not a string')
+    return result
   }
 
   if (!targetDb) {
