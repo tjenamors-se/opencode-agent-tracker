@@ -346,4 +346,51 @@ export class TrackingService {
       updated_at: new Date()
     }
   }
+
+  /**
+   * Checks agent health by reading state from DB and pending git changes
+   * from the filesystem via child_process. Never stores git state in DB.
+   * @param agentId - The agent to check
+   * @param workdir - Working directory for git status check
+   * @returns AgentHealthStatus with current state and pending changes
+   */
+  async checkAgentHealth(agentId: string, workdir: string): Promise<import('./types.js').AgentHealthStatus> {
+    const pendingChanges = TrackingService.getPendingGitChanges(workdir)
+
+    const agent = await this.getOrReadAgent(agentId)
+
+    const status: import('./types.js').AgentHealthStatus = {
+      agent_id: agentId,
+      skill_points: agent?.skill_points ?? 0,
+      experience_points: agent?.experience_points ?? 0,
+      communication_score: agent?.communication_score ?? 0,
+      total_commits: agent?.total_commits ?? 0,
+      total_bugs: agent?.total_bugs ?? 0,
+      halted: agent ? agent.skill_points <= 0 : true,
+      pending_changes: pendingChanges,
+      checked_at: new Date()
+    }
+
+    return status
+  }
+
+  /**
+   * Runs git status --porcelain in the given directory.
+   * Returns list of changed file paths. Never throws.
+   */
+  static getPendingGitChanges(workdir: string): string[] {
+    try {
+      const { execSync } = require('child_process')
+      const output = execSync('git status --porcelain', {
+        cwd: workdir,
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      }) as string
+      if (!output || !output.trim()) return []
+      return output.trim().split('\n').filter((line: string) => line.length > 0)
+    } catch (_error) {
+      return []
+    }
+  }
 }

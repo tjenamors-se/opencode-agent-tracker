@@ -585,3 +585,120 @@ describe('TrackingService - branch coverage', () => {
     ).resolves.not.toThrow();
   });
 });
+
+describe('TrackingService - checkAgentHealth', () => {
+  let trackingService: TrackingService;
+  let mockDB: MockDatabase;
+  let writeBuffer: WriteBuffer;
+  let mockClient: any;
+
+  const makeAgent = (overrides: Partial<AgentData> = {}): AgentData => ({
+    id: 'health-agent',
+    name: 'Health Agent',
+    model: 'test-model',
+    scope: 'test',
+    skill_points: 1,
+    experience_points: 0,
+    communication_score: 60,
+    total_commits: 0,
+    total_bugs: 0,
+    active: true,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides
+  });
+
+  beforeEach(() => {
+    mockDB = new MockDatabase();
+    writeBuffer = new WriteBuffer();
+    mockClient = {
+      app: { log: jest.fn().mockResolvedValue(true) },
+      tui: {
+        toast: { show: jest.fn().mockResolvedValue(true) },
+        input: { text: jest.fn().mockResolvedValue('') }
+      }
+    };
+    trackingService = new TrackingService(mockDB, writeBuffer, mockClient);
+  });
+
+  it('should return healthy status for agent with SP > 0', async () => {
+    await mockDB.putAgent('health-agent', makeAgent({ skill_points: 2, experience_points: 10 }));
+
+    const health = await trackingService.checkAgentHealth('health-agent', process.cwd());
+
+    expect(health.agent_id).toBe('health-agent');
+    expect(health.skill_points).toBe(2);
+    expect(health.experience_points).toBe(10);
+    expect(health.halted).toBe(false);
+    expect(health.checked_at).toBeInstanceOf(Date);
+  });
+
+  it('should return halted status when SP is 0', async () => {
+    await mockDB.putAgent('halted-health', makeAgent({ id: 'halted-health', skill_points: 0 }));
+
+    const health = await trackingService.checkAgentHealth('halted-health', process.cwd());
+
+    expect(health.halted).toBe(true);
+    expect(health.skill_points).toBe(0);
+  });
+
+  it('should return halted status when SP is negative', async () => {
+    await mockDB.putAgent('neg-sp', makeAgent({ id: 'neg-sp', skill_points: -1 }));
+
+    const health = await trackingService.checkAgentHealth('neg-sp', process.cwd());
+
+    expect(health.halted).toBe(true);
+    expect(health.skill_points).toBe(-1);
+  });
+
+  it('should return halted=true with defaults for unknown agent', async () => {
+    const health = await trackingService.checkAgentHealth('nonexistent-health', process.cwd());
+
+    expect(health.halted).toBe(true);
+    expect(health.skill_points).toBe(0);
+    expect(health.experience_points).toBe(0);
+    expect(health.communication_score).toBe(0);
+  });
+
+  it('should include pending_changes as an array', async () => {
+    await mockDB.putAgent('pending-agent', makeAgent({ id: 'pending-agent' }));
+
+    const health = await trackingService.checkAgentHealth('pending-agent', process.cwd());
+
+    expect(Array.isArray(health.pending_changes)).toBe(true);
+  });
+
+  it('should include all agent fields in health status', async () => {
+    await mockDB.putAgent('full-health', makeAgent({
+      id: 'full-health',
+      skill_points: 3,
+      experience_points: 50,
+      communication_score: 80,
+      total_commits: 10,
+      total_bugs: 1
+    }));
+
+    const health = await trackingService.checkAgentHealth('full-health', process.cwd());
+
+    expect(health.total_commits).toBe(10);
+    expect(health.total_bugs).toBe(1);
+    expect(health.communication_score).toBe(80);
+  });
+});
+
+describe('TrackingService.getPendingGitChanges', () => {
+  it('should return an array', () => {
+    const changes = TrackingService.getPendingGitChanges(process.cwd());
+    expect(Array.isArray(changes)).toBe(true);
+  });
+
+  it('should return empty array for invalid directory', () => {
+    const changes = TrackingService.getPendingGitChanges('/nonexistent/path/that/does/not/exist');
+    expect(changes).toEqual([]);
+  });
+
+  it('should return empty array when git is not available', () => {
+    const changes = TrackingService.getPendingGitChanges('/tmp');
+    expect(changes).toEqual([]);
+  });
+});

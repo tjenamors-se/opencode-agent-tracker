@@ -132,3 +132,16 @@ export type OpenCodeContext = {
   directory: string
   worktree: string
 }
+
+/** Result of an agent health check, run on every plugin event */
+export interface AgentHealthStatus {
+  agent_id: string
+  skill_points: number
+  experience_points: number
+  communication_score: number
+  total_commits: number
+  total_bugs: number
+  halted: boolean
+  pending_changes: string[]
+  checked_at: Date
+}

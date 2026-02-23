@@ -5,7 +5,7 @@ import { WriteBuffer } from './write-buffer.js'
 import { DependencyChecker } from './dependency-checker.js'
 import { EnvProtection } from './env-protection.js'
 import { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
-import type { PluginConfig, DatabaseConfig } from './types.js'
+import type { PluginConfig, DatabaseConfig, AgentHealthStatus } from './types.js'
 
 export { migrateFromProjectDatabase, detectOldDatabase } from './migration.js'
 
@@ -21,6 +21,26 @@ function resolveDatabaseConfig(pluginConfig: PluginConfig): DatabaseConfig {
     config.maxSize = pluginConfig.maxDatabaseSize
   }
   return config
+}
+
+/**
+ * Formats AgentHealthStatus into a human-readable status block for toasts/logs.
+ */
+function formatHealthStatus(health: AgentHealthStatus): string {
+  const lines: string[] = []
+  lines.push(`--- Agent Status: ${health.agent_id} ---`)
+  lines.push(`SP: ${health.skill_points} | XP: ${health.experience_points} | CS: ${health.communication_score}`)
+  lines.push(`Commits: ${health.total_commits} | Bugs: ${health.total_bugs}`)
+  lines.push(`Halted: ${health.halted ? 'YES' : 'no'}`)
+  if (health.pending_changes.length > 0) {
+    lines.push(`Pending changes (${health.pending_changes.length}):`)
+    for (const change of health.pending_changes) {
+      lines.push(`  ${change}`)
+    }
+  } else {
+    lines.push('Pending changes: none')
+  }
+  return lines.join('\n')
 }
 
 const AgentTrackerPlugin: Plugin = async (context: any) => {
@@ -49,10 +69,56 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
   })
 
   /**
+   * Checks agent health and blocks execution if halted.
+   * Shows toast with full status menu when agent is halted.
+   * @returns true if the agent is halted and the event should be blocked
+   */
+  async function guardAgentHealth(source: any): Promise<boolean> {
+    const agentId = source?.agentId || source?.agent?.id || null
+    if (!agentId) return false
+    if (!db.isAvailable) return false
+
+    try {
+      const health = await trackingService.checkAgentHealth(agentId, directory)
+
+      if (health.halted) {
+        const statusText = formatHealthStatus(health)
+        await client.tui.toast.show({
+          message: `AGENT HALTED: ${agentId} has SP <= 0. All actions blocked.\n${statusText}`,
+          variant: 'error'
+        }).catch(() => {})
+
+        await client.app.log({
+          body: {
+            service: 'agent-tracker',
+            level: 'error',
+            message: `Agent ${agentId} is halted (SP: ${health.skill_points}). Blocking event.`,
+            extra: { health }
+          }
+        }).catch(() => {})
+
+        return true
+      }
+
+      if (health.pending_changes.length > 0) {
+        await client.app.log({
+          body: {
+            service: 'agent-tracker',
+            level: 'warning',
+            message: `Agent ${agentId} has ${health.pending_changes.length} pending uncommitted change(s)`,
+            extra: { pending: health.pending_changes }
+          }
+        }).catch(() => {})
+      }
+    } catch (_error) {
+      // Health check failure must never block execution
+    }
+
+    return false
+  }
+
+  /**
    * Auto-migrates old per-project database on session start.
-   * - If ./~ has an LMDB file and not yet migrated: auto-migrate
-   * - If ./~ exists but no LMDB file: warn user (something else created it)
-   * - If already migrated or no ./~: no-op
    */
   async function autoMigrate(): Promise<void> {
     try {
@@ -147,6 +213,10 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
     },
 
     'tool.execute.before': async (input) => {
+      const halted = await guardAgentHealth(input)
+      if (halted) {
+        throw new Error('Agent is halted (SP <= 0). All tool execution blocked. Provide a step-by-step action plan to resume.')
+      }
       await envProtection.handleToolBefore(input)
     },
 
@@ -157,6 +227,8 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
     },
 
     'command.executed': async (event: any) => {
+      const halted = await guardAgentHealth(event)
+      if (halted) return
       if (event.success) {
         await trackingService.trackCommandCompletion(event)
       }
@@ -166,9 +238,11 @@ const AgentTrackerPlugin: Plugin = async (context: any) => {
       await dependencyChecker.validate()
       await trackingService.initializeSessionTracking(session)
       await autoMigrate()
+      await guardAgentHealth(session)
     },
 
     'session.idle': async (session: any) => {
+      await guardAgentHealth(session)
       await trackingService.generateRetrospective(session)
     },
 
