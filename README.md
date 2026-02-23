@@ -1,83 +1,81 @@
 # @tjenamors.se/opencode-agent-tracker
 
-⚠️ **Development Repository** - Under active development
-
 High-performance agent tracking for OpenCode using LMDB. This plugin replaces JSON-based tracking with memory-mapped database storage for near-RAM performance.
 
-## ⚡ Quick Start
-
-*Note: Plugin is under development - installation instructions coming soon*
+## Quick Start
 
 ```bash
-# Coming soon
 npm install @tjenamors.se/opencode-agent-tracker
 ```
 
-## 🎯 Features
+## Features
 
-- **Lightning Performance**: LMDB memory-mapped database for near-RAM speed
-- **XP/SP Tracking**: Comprehensive skill point and experience tracking
-- **Git Hook Integration**: Real-time commit tracking with agent validation
-- **Graceful Degradation**: Continues working even when LMDB unavailable
-- **TypeScript Native**: Full type safety with comprehensive definitions
-- **🔒 .env Protection**: Blocks reading/writing of environment files
-- **📊 Communication Scoring**: Tracks collaboration quality (-1/+1/+2 grading)
-- **🔔 Smart Notifications**: Toast notifications for critical events
+- **LMDB Storage**: Memory-mapped database with sub-database architecture for near-RAM speed
+- **XP/SP Tracking**: Skill point and experience point tracking with leveling system
+- **Communication Scoring**: Tracks collaboration quality with Bad/Neutral/Good/Excellence grading
+- **Write Batching**: Buffers writes in memory and flushes on session end for reduced I/O
+- **Migration**: Automatically migrates data from per-project databases to centralized storage
+- **Graceful Degradation**: Continues working when LMDB is unavailable
+- **.env Protection**: Blocks agent access to environment files
+- **TypeScript Native**: Full type safety with strict mode
 
-## 🚀 Local Testing
+## Configuration
 
-### Quick Setup
+Add configuration to your OpenCode config file (`~/.config/opencode/config.yaml` or equivalent):
+
+```yaml
+plugins:
+  agent-tracker:
+    databasePath: "~/.config/opencode/agent-tracker.lmdb"
+    maxDatabaseSize: 536870912
+```
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `databasePath` | `string` | `~/.config/opencode/agent-tracker.lmdb` | Path to the LMDB database file. Resolved relative to the user's home directory. |
+| `maxDatabaseSize` | `number` | `536870912` (512 MB) | Maximum database size in bytes. Range: 1 MB to 2 GB. |
+
+The database is centralized by default -- all projects share a single database in the user's home directory. This enables cross-project agent performance comparison.
+
+### Migration from Per-Project Databases
+
+If the plugin detects an old per-project database at `<project>/.config/opencode/agent-tracker.lmdb`, it will automatically perform an additive merge migration on startup. Existing entries in the central database are not overwritten. The source database is left intact for manual cleanup.
+
+## Local Testing
+
 ```bash
-# Build plugin and create symlink
+# Build and create symlink to OpenCode plugins directory
 npm run setup-local
 
-# Test functionality without OpenCode
+# Test without OpenCode
 npm run test-local
 ```
 
-### Manual Setup
+### Development Commands
+
 ```bash
-# 1. Build the plugin
-npm run build
-
-# 2. Create symlink to OpenCode plugins directory
-ln -sf "$(pwd)/dist" ~/.config/opencode/plugins/agent-tracker
-
-# 3. Start OpenCode - plugin will auto-load
+npm run typecheck    # TypeScript type checking
+npm test             # Run unit tests
+npm run test:coverage # Coverage report (80% minimum)
+npm run lint         # ESLint
+npm run build        # Build to dist/
+npm run clean        # Remove build artifacts
 ```
 
-### Testing Commands
-```bash
-# Verify TypeScript compilation
-npm run typecheck
+## Architecture
 
-# Run unit tests
-npm test
+The plugin uses five LMDB sub-databases:
 
-# Test coverage
-npm run test:coverage
+- **agents** -- Agent state (SP, XP, CS, commits, bugs)
+- **commits** -- Commit metadata keyed by project and hash
+- **communication** -- Communication score events
+- **retrospectives** -- Per-commit retrospective entries
+- **activities** -- Activity journal entries
 
-# Manual plugin test
-npm run test-local
-```
+All writes are buffered in memory via `WriteBuffer` and flushed to disk on session end or explicit flush. Reads are synchronous (memory-mapped) and free.
 
-## 🏗️ Development Status
-
-🔧 **Phase 1**: Foundation setup  
-📝 **License**: GPL-3.0-or-later  
-🧪 **Testing**: 100% coverage target  
-🚀 **CI/CD**: GitHub Actions workflows
-
-## 📖 Documentation
-
-- [Development Plan](./PLAN.md) - Comprehensive development roadmap
-- [Architecture Overview](./docs/ARCHITECTURE.md) - Technical design
-- [API Reference](./docs/API.md) - Plugin interface documentation
-
-## 🤝 Contributing
-
-Interested in contributing? Please review our [contributing guidelines](./docs/CONTRIBUTING.md) and [development workflow](./docs/DEVELOPMENT.md). This project follows semantic versioning starting with `0.0.0-alpha-<commit_hash>`.
-
-## 📄 License
+## License
 
 GNU General Public License v3.0 or later - See [LICENSE](./LICENSE) for details.
