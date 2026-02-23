@@ -53,5 +53,27 @@
     "score_after": 93,
     "agent_note": "Five milestones completed in single session. Clone-on-read fix, LMDB flat-file discovery, coverage gate met.",
     "user_note": ""
+  },
+  {
+    "commit": "9596f5f",
+    "timestamp": "2026-02-23T23:00:00",
+    "task": "Apply structured review fixes (11 items)",
+    "agent_grade": "good",
+    "user_grade": "pending",
+    "score_before": 93,
+    "score_after": 93,
+    "agent_note": "Systematic fix application from review. Regex bug, safeLog wrapper, monotonic counter, TUI prompts all addressed.",
+    "user_note": ""
+  },
+  {
+    "commit": "c62cbed",
+    "timestamp": "2026-02-23T23:30:00",
+    "task": "Wire migration as custom tool, auto-delete ./~ after migration",
+    "agent_grade": "good",
+    "user_grade": "pending",
+    "score_before": 93,
+    "score_after": 93,
+    "agent_note": "Clean wiring. Inline tool definition sidesteps Jest/TS resolution issue. Cleanup is non-fatal.",
+    "user_note": ""
   }
 ]
