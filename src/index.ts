@@ -29,11 +29,16 @@ function resolveDatabaseConfig(pluginConfig: PluginConfig): DatabaseConfig {
 function formatHealthStatus(health: AgentHealthStatus): string {
   const spLevelUp = (10 * health.skill_points).toFixed(1)
   const content: string[] = []
+  const sp = health.skill_points.toFixed(1)
+  const xp = health.experience_points.toFixed(1)
+  const cs = health.communication_score.toFixed(1)
+  const commits = health.total_commits.toFixed(1)
+  const bugs = health.total_bugs.toFixed(1)
   content.push(`Agent: ${health.agent_id}`)
-  content.push(`SP: ${health.skill_points} | XP: ${health.experience_points} | CS: ${health.communication_score}`)
-  content.push(`Commits: ${health.total_commits} | Bugs: ${health.total_bugs}`)
+  content.push(`SP: ${sp} | XP: ${xp} | CS: ${cs}`)
+  content.push(`Commits: ${commits} | Bugs: ${bugs}`)
   content.push(`Halted: ${health.halted ? 'YES' : 'no'}`)
-  content.push(`SP level-up at: ${spLevelUp} XP (10 * ${health.skill_points})`)
+  content.push(`SP level-up at: ${spLevelUp} XP (10 * ${sp})`)
   if (health.pending_changes.length > 0) {
     content.push(`Pending changes (${health.pending_changes.length}):`)
     for (const change of health.pending_changes) {
