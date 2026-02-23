@@ -1,7 +1,7 @@
 import { EnvProtection } from '../../src/env-protection';
 
 describe('EnvProtection', () => {
-  let envProtection;
+  let envProtection: EnvProtection;
 
   beforeEach(() => {
     envProtection = new EnvProtection();
@@ -33,12 +33,27 @@ describe('EnvProtection', () => {
     expect(envProtection['isEnvFile']('/path/to/.env.production')).toBe(true);
     expect(envProtection['isEnvFile']('/path/to/package.json')).toBe(false);
   });
-});
-describe('EnvProtection - write and edit tools', () => {
-  let envProtection: any;
 
-  beforeEach(async () => {
-    const { EnvProtection } = await import('../../src/env-protection');
+  it('should catch custom .env variants via catch-all pattern', () => {
+    expect(envProtection['isEnvFile']('/path/to/.env.staging')).toBe(true);
+    expect(envProtection['isEnvFile']('/path/to/.env.custom')).toBe(true);
+  });
+
+  it('should not crash when args is undefined', async () => {
+    const input = { tool: 'read' };
+    await expect(envProtection.handleToolBefore(input)).resolves.not.toThrow();
+  });
+
+  it('should not crash when args.filePath is undefined', async () => {
+    const input = { tool: 'read', args: {} };
+    await expect(envProtection.handleToolBefore(input)).resolves.not.toThrow();
+  });
+});
+
+describe('EnvProtection - write and edit tools', () => {
+  let envProtection: EnvProtection;
+
+  beforeEach(() => {
     envProtection = new EnvProtection();
   });
 

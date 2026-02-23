@@ -11,6 +11,7 @@ interface BufferEntry {
 
 export class WriteBuffer {
   private buffer: Map<string, BufferEntry> = new Map()
+  private counter: number = 0
 
   bufferAgent(agentId: string, data: AgentData): void {
     this.buffer.set(`agent:${agentId}`, {
@@ -29,7 +30,8 @@ export class WriteBuffer {
   }
 
   bufferCommunicationEvent(event: CommunicationScoreEvent): void {
-    const key = `communication:${event.agent_id}:${event.commit_hash}:${Date.now()}`
+    const seq = ++this.counter
+    const key = `communication:${event.agent_id}:${event.commit_hash}:${seq}`
     this.buffer.set(key, {
       type: 'communication',
       data: event,

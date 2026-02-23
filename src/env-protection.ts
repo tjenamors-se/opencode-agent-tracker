@@ -1,9 +1,18 @@
+/**
+ * Blocks tool operations on .env files to prevent accidental secret exposure.
+ * Intercepts read, write, and edit tool calls via the tool.execute.before hook.
+ */
 export class EnvProtection {
   
+  /**
+   * Validates tool input and blocks operations targeting .env files.
+   * @param input - Tool execution input containing tool name and args
+   * @throws Error if the tool targets a .env file
+   */
   async handleToolBefore(input: any): Promise<void> {
     const { tool, args } = input
-    
-    // Protect against .env file operations
+    if (!args?.filePath) return
+
     if (tool === 'read' && this.isEnvFile(args.filePath)) {
       throw new Error('Do not read .env files')
     }
@@ -17,6 +26,10 @@ export class EnvProtection {
     }
   }
 
+  /**
+   * @param filePath - Path to check for .env pattern match
+   * @returns True if the file matches any .env naming pattern
+   */
   private isEnvFile(filePath: string): boolean {
     if (!filePath) return false
     
@@ -28,7 +41,7 @@ export class EnvProtection {
       /\.env\.test$/i,
       /\.env\.example$/i,
       /\.env\.sample$/i,
-      /\.env\.[^.]\+$/i
+      /\.env\.[^.]+$/i
     ]
 
     return envPatterns.some(pattern => pattern.test(filePath))

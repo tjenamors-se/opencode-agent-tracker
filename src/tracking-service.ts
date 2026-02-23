@@ -36,10 +36,39 @@ export class TrackingService {
     this.writeBuffer.bufferAgent(agent.id, agent)
   }
 
+  /**
+   * Extracts agent ID from any hook input, command event, or session object.
+   */
+  private extractAgentId(source: any): string | null {
+    return source?.agentId || source?.agent?.id || null
+  }
+
+  /**
+   * Fire-and-forget log call. Never throws.
+   */
+  private safeLog(body: Record<string, unknown>): void {
+    try {
+      this.client?.app?.log({ body })?.catch?.(() => {})
+    } catch (_error) {
+      // Never crash the host
+    }
+  }
+
+  /**
+   * Fire-and-forget toast call. Never throws.
+   */
+  private async safeToast(message: string, variant: string): Promise<void> {
+    try {
+      await this.client?.tui?.toast?.show({ message, variant })
+    } catch (_error) {
+      // Never crash the host
+    }
+  }
+
   async trackToolUsage(input: any, output: any): Promise<void> {
     if (!this.db.isAvailable) return
 
-    const agentId = this.getAgentId(input)
+    const agentId = this.extractAgentId(input)
     if (!agentId) return
 
     if (output.success) {
@@ -50,13 +79,13 @@ export class TrackingService {
       }
     }
 
-    await this.client.app.log({ body: { message: 'Tool usage tracked', agentId } })
+    this.safeLog({ message: 'Tool usage tracked', agentId })
   }
 
   async trackCommandCompletion(event: any): Promise<void> {
     if (!this.db.isAvailable) return
 
-    const agentId = this.getAgentIdFromCommand(event)
+    const agentId = this.extractAgentId(event)
     if (!agentId) return
 
     if (event.success) {
@@ -94,15 +123,15 @@ export class TrackingService {
       agent.skill_points += 1
       agent.experience_points = 0
 
-      await this.client.tui.toast.show({
-        message: `Agent ${agentId} leveled up to SP ${agent.skill_points}!`,
-        variant: 'success'
-      })
+      await this.safeToast(
+        `Agent ${agentId} leveled up to SP ${agent.skill_points}!`,
+        'success'
+      )
     }
 
     this.bufferAgentUpdate(agent)
 
-    await this.client.app.log({ body: { message: 'Commit tracked', commitHash } })
+    this.safeLog({ message: 'Commit tracked', commitHash })
   }
 
   async recordCommunicationScore(agentId: string, commitHash: string, projectPath: string, grade: Grade): Promise<void> {
@@ -124,13 +153,13 @@ export class TrackingService {
       this.bufferAgentUpdate(agent)
     }
 
-    await this.client.app.log({ body: { message: 'Communication score recorded', agentId, grade } })
+    this.safeLog({ message: 'Communication score recorded', agentId, grade })
   }
 
   async initializeSessionTracking(session: any): Promise<void> {
     if (!this.db.isAvailable) return
 
-    const agentId = this.getAgentIdFromSession(session)
+    const agentId = this.extractAgentId(session)
     if (!agentId) return
 
     let agent = await this.getOrReadAgent(agentId)
@@ -140,36 +169,39 @@ export class TrackingService {
       this.writeBuffer.bufferAgent(agentId, agent)
     }
 
-    await this.client.app.log({ body: { message: 'Session tracking initialized', agentId } })
+    this.safeLog({ message: 'Session tracking initialized', agentId })
   }
 
   async generateRetrospective(session: any): Promise<void> {
     if (!this.db.isAvailable) return
 
-    const agentId = this.getAgentIdFromSession(session)
+    const agentId = this.extractAgentId(session)
     if (!agentId) return
 
-    await this.client.app.log({
-      body: {
-        service: 'agent-tracker',
-        level: 'info',
-        message: 'Session retrospective generated',
-        extra: { agentId, sessionId: session.id }
-      }
+    this.safeLog({
+      service: 'agent-tracker',
+      level: 'info',
+      message: 'Session retrospective generated',
+      extra: { agentId, sessionId: session.id }
     })
 
-    await this.client.app.log({ body: { message: 'Retrospective generated', sessionId: session.id } })
+    this.safeLog({ message: 'Retrospective generated', sessionId: session.id })
   }
 
+  /**
+   * Finalizes a session by flushing all buffered writes.
+   * Flush runs regardless of agent ID -- there may be buffered data
+   * from earlier operations in the same session.
+   */
   async finalizeSession(session: any): Promise<void> {
     if (!this.db.isAvailable) return
 
-    const agentId = this.getAgentIdFromSession(session)
-    if (!agentId) return
-
     await this.flushWriteBuffer()
 
-    await this.client.app.log({ body: { message: 'Session finalized', sessionId: session.id } })
+    const agentId = this.extractAgentId(session)
+    if (agentId) {
+      this.safeLog({ message: 'Session finalized', sessionId: session.id })
+    }
   }
 
   /**
@@ -212,10 +244,10 @@ export class TrackingService {
 
     if (agent.skill_points <= 0) {
       agent.active = false
-      await this.client.tui.toast.show({
-        message: `Agent ${agentId} halted: SP reached ${agent.skill_points}`,
-        variant: 'error'
-      })
+      await this.safeToast(
+        `Agent ${agentId} halted: SP reached ${agent.skill_points}`,
+        'error'
+      )
     }
 
     this.bufferAgentUpdate(agent)
@@ -223,6 +255,7 @@ export class TrackingService {
 
   /**
    * Records both agent and user grades for a commit (R8.2).
+   * Prompts the user for task description and notes via client.tui input.
    */
   async recordCommitGrade(agentId: string, commitHash: string, projectPath: string, agentGrade: Grade, userGrade: Grade): Promise<void> {
     const agent = await this.getOrReadAgent(agentId)
@@ -240,19 +273,47 @@ export class TrackingService {
 
     this.bufferAgentUpdate(agent)
 
-    const entry: RetrospectiveEntry = {
+    const retrospective = await this.promptRetrospective(commitHash, agentGrade, userGrade, scoreBefore, agent.communication_score)
+
+    this.writeBuffer.bufferRetrospective(agentId, commitHash, retrospective)
+  }
+
+  /**
+   * Prompts the user for retrospective fields via client.tui.
+   * Falls back to empty strings if the client API is unavailable.
+   */
+  private async promptRetrospective(
+    commitHash: string,
+    agentGrade: Grade,
+    userGrade: Grade,
+    scoreBefore: number,
+    scoreAfter: number
+  ): Promise<RetrospectiveEntry> {
+    let task = ''
+    let agentNote = ''
+    let userNote = ''
+
+    try {
+      if (this.client?.tui?.input?.text) {
+        task = (await this.client.tui.input.text({ message: 'Task description for this commit:' })) ?? ''
+        agentNote = (await this.client.tui.input.text({ message: 'Agent note (what went well / could improve):' })) ?? ''
+        userNote = (await this.client.tui.input.text({ message: 'User note (optional, press Enter to skip):' })) ?? ''
+      }
+    } catch (_error) {
+      // Fall back to empty strings if prompting fails
+    }
+
+    return {
       commit: commitHash,
       timestamp: new Date().toISOString(),
-      task: '',
+      task,
       agent_grade: agentGrade,
       user_grade: userGrade,
       score_before: scoreBefore,
-      score_after: agent.communication_score,
-      agent_note: '',
-      user_note: ''
+      score_after: scoreAfter,
+      agent_note: agentNote,
+      user_note: userNote
     }
-
-    this.writeBuffer.bufferRetrospective(agentId, commitHash, entry)
   }
 
   /**
@@ -284,17 +345,5 @@ export class TrackingService {
       created_at: new Date(),
       updated_at: new Date()
     }
-  }
-
-  private getAgentId(input: any): string | null {
-    return input?.agentId || input?.agent?.id || null
-  }
-
-  private getAgentIdFromCommand(event: any): string | null {
-    return event?.agentId || event?.agent?.id || null
-  }
-
-  private getAgentIdFromSession(session: any): string | null {
-    return session?.agentId || session?.agent?.id || null
   }
 }

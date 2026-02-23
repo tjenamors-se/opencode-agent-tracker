@@ -93,7 +93,8 @@ export class LMDBDatabase implements Database {
       })
 
       return true
-    } catch (_error) {
+    } catch (error) {
+      console.error('LMDBDatabase initialization failed:', error)
       return false
     }
   }

@@ -4,6 +4,13 @@ import { existsSync } from 'fs'
 import type { Database } from './database.js'
 import type { MigrationResult, AgentData, CommitData, CommunicationScoreEvent } from './types.js'
 
+/**
+ * The old buggy code used raw '~' in the path string, which Node.js does not
+ * expand. LMDB treated it as a relative path from process.cwd(), creating a
+ * literal '~/.config/opencode/agent-tracker.lmdb' directory inside each
+ * project. We intentionally use the same literal '~' here so we can detect
+ * and migrate those broken per-project databases.
+ */
 const OLD_DB_RELATIVE_PATH = join('~', '.config', 'opencode', 'agent-tracker.lmdb')
 
 /**

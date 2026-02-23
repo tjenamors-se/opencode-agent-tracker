@@ -35,6 +35,9 @@ describe('TrackingService', () => {
       tui: {
         toast: {
           show: jest.fn().mockResolvedValue(true)
+        },
+        input: {
+          text: jest.fn().mockResolvedValue('')
         }
       }
     };
@@ -71,6 +74,15 @@ describe('TrackingService', () => {
         { success: true }
       );
       expect(writeBuffer.isEmpty).toBe(true);
+    });
+
+    it('should not crash when client.app.log throws', async () => {
+      mockClient.app.log = jest.fn().mockRejectedValue(new Error('log failed'));
+      await mockDB.putAgent('test-agent', makeAgent());
+
+      await expect(
+        trackingService.trackToolUsage({ agentId: 'test-agent' }, { success: true })
+      ).resolves.not.toThrow();
     });
   });
 
@@ -206,6 +218,19 @@ describe('TrackingService', () => {
       const dbAgent = await mockDB.getAgent('test-agent');
       expect(dbAgent?.total_commits).toBe(1);
     });
+
+    it('should flush even when session has no agentId', async () => {
+      await mockDB.putAgent('test-agent', makeAgent());
+      await trackingService.commitCompleted('test-agent', 'abc123', '/project', 'Task');
+      expect(writeBuffer.size).toBeGreaterThan(0);
+
+      const session = { id: 'session-no-agent' };
+      await trackingService.finalizeSession(session);
+
+      expect(writeBuffer.isEmpty).toBe(true);
+      const dbAgent = await mockDB.getAgent('test-agent');
+      expect(dbAgent?.total_commits).toBe(1);
+    });
   });
 
   describe('flushWriteBuffer', () => {
@@ -335,6 +360,39 @@ describe('TrackingService', () => {
       const agent = await mockDB.getAgent('xp-agent');
       expect(agent?.experience_points).toBe(1);
     });
+
+    it('should prompt for retrospective fields via client.tui.input.text', async () => {
+      mockClient.tui.input.text = jest.fn()
+        .mockResolvedValueOnce('Fix login bug')
+        .mockResolvedValueOnce('Smooth execution')
+        .mockResolvedValueOnce('Good work');
+
+      await mockDB.putAgent('prompt-agent', makeAgent({ id: 'prompt-agent' }));
+
+      await trackingService.recordCommitGrade('prompt-agent', 'abc123', '/project', 2, 2);
+      await trackingService.flushWriteBuffer();
+
+      const retros = await mockDB.getRetrospectives('prompt-agent');
+      expect(retros.length).toBe(1);
+      expect(retros[0]?.task).toBe('Fix login bug');
+      expect(retros[0]?.agent_note).toBe('Smooth execution');
+      expect(retros[0]?.user_note).toBe('Good work');
+    });
+
+    it('should fall back to empty strings when input is unavailable', async () => {
+      delete mockClient.tui.input;
+
+      await mockDB.putAgent('noinput-agent', makeAgent({ id: 'noinput-agent' }));
+
+      await trackingService.recordCommitGrade('noinput-agent', 'abc123', '/project', 2, 2);
+      await trackingService.flushWriteBuffer();
+
+      const retros = await mockDB.getRetrospectives('noinput-agent');
+      expect(retros.length).toBe(1);
+      expect(retros[0]?.task).toBe('');
+      expect(retros[0]?.agent_note).toBe('');
+      expect(retros[0]?.user_note).toBe('');
+    });
   });
 
   describe('recordRetrospective (R8.2)', () => {
@@ -407,6 +465,27 @@ describe('TrackingService', () => {
       expect(dbAgent?.communication_score).toBe(60);
     });
   });
+
+  describe('graceful degradation', () => {
+    it('should not crash when client is null', async () => {
+      const nullClientService = new TrackingService(mockDB, writeBuffer, null);
+      await mockDB.putAgent('test-agent', makeAgent());
+
+      await expect(
+        nullClientService.trackToolUsage({ agentId: 'test-agent' }, { success: true })
+      ).resolves.not.toThrow();
+    });
+
+    it('should not crash when client.app is undefined', async () => {
+      const badClient = { tui: { toast: { show: jest.fn() } } };
+      const badClientService = new TrackingService(mockDB, writeBuffer, badClient);
+      await mockDB.putAgent('test-agent', makeAgent());
+
+      await expect(
+        badClientService.trackToolUsage({ agentId: 'test-agent' }, { success: true })
+      ).resolves.not.toThrow();
+    });
+  });
 });
 
 describe('TrackingService - branch coverage', () => {
@@ -436,7 +515,10 @@ describe('TrackingService - branch coverage', () => {
     writeBuffer = new WriteBuffer();
     mockClient = {
       app: { log: jest.fn().mockResolvedValue(true) },
-      tui: { toast: { show: jest.fn().mockResolvedValue(true) } }
+      tui: {
+        toast: { show: jest.fn().mockResolvedValue(true) },
+        input: { text: jest.fn().mockResolvedValue('') }
+      }
     };
     trackingService = new TrackingService(mockDB, writeBuffer, mockClient);
   });
@@ -479,9 +561,15 @@ describe('TrackingService - branch coverage', () => {
     await expect(trackingService.generateRetrospective(session)).resolves.not.toThrow();
   });
 
-  it('should handle finalizeSession with null agentId', async () => {
+  it('should handle finalizeSession with null agentId and still flush', async () => {
+    await mockDB.putAgent('test-agent', makeAgent());
+    await trackingService.trackToolUsage({ agentId: 'test-agent' }, { success: true });
+    expect(writeBuffer.size).toBeGreaterThan(0);
+
     const session = { id: 'session-1' };
-    await expect(trackingService.finalizeSession(session)).resolves.not.toThrow();
+    await trackingService.finalizeSession(session);
+
+    expect(writeBuffer.isEmpty).toBe(true);
   });
 
   it('should handle commitCompleted with non-existent agent', async () => {
