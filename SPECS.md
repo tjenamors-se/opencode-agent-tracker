@@ -286,3 +286,154 @@ Map to labels: `{ [-1]: 'bad', [1]: 'neutral', [2]: 'good', [5]: 'excellence' }`
 - Remote/network database support
 - Schema versioning or format migration
 - Read-side caching (unnecessary -- LMDB reads are already memory-mapped)
+
+---
+
+# SPECS: NPM Postinstall Setup (R9)
+
+**Status**: Draft
+**Date**: 2026-02-23
+**Scope**: Automated installation of plugin, skills, agent definitions, and scoring system via npm postinstall
+
+---
+
+## User Story
+
+> As a user, I want an installation that creates the skills, adds the agents in opencode.json, adds the plugin, and copies the plugin itself to the plugin directory, so that I get a fully configured agent tracking environment with a single `npm install`.
+
+---
+
+## Problem Statement
+
+Currently the plugin is loaded via a `file://` path in `opencode.json`, skills are manually placed in `~/.config/opencode/skills/`, agent definitions are manually added to `opencode.json`, and the scoring system (AGENTS.md) is manually maintained. A new user must perform 5+ manual steps to get a working setup. This should be automated via an npm postinstall script.
+
+---
+
+## Requirements
+
+### R9: NPM Postinstall Script
+
+A single postinstall script (`scripts/postinstall.mjs`) that runs after `npm install` and performs the following actions in order:
+
+#### R9.1: Copy plugin to plugins directory
+- Copy the contents of the package's `dist/` directory to `~/.config/opencode/plugins/agent-tracker/`
+- Create the target directory (and parents) if it does not exist
+- Overwrite existing files (the plugin itself should always be the latest version)
+- Use `os.homedir()` and `path.join()` for path resolution (no raw `~`)
+
+#### R9.2: Install skills
+- Bundle the following skill directories inside the npm package (in a `skills/` directory at the package root):
+  - `skills/agile-spec-to-build/SKILL.md`
+  - `skills/structured-review/SKILL.md`
+- Copy each skill directory to `~/.config/opencode/skills/<skill-name>/`
+- **Skip if the skill directory already exists** -- do not overwrite user customizations
+- Print a message indicating whether each skill was installed or skipped
+
+#### R9.3: Install agent definitions
+- Bundle agent definitions inside the npm package (in `agents/agents.json`)
+- The 4 agent definitions: `spec-agent`, `brainstorm`, `architect-plan`, `engineer-build`
+- Read the user's `~/.config/opencode/opencode.json`
+- If the file does not exist, create it with a minimal valid structure
+- For each agent definition:
+  - **Skip if the agent key already exists** in the user's config -- do not overwrite
+  - **Add if not present**
+- Write the updated config back to disk
+- Print a message indicating whether each agent was added or skipped
+
+#### R9.4: Register plugin in opencode.json
+- Read the `plugin` array from `~/.config/opencode/opencode.json`
+- The plugin path should reference the copied location: `~/.config/opencode/plugins/agent-tracker`
+- **Only add if not already present** in the array (check by path suffix `plugins/agent-tracker` or exact match)
+- Also remove any stale `file://` dev paths pointing to the source repo
+- Write the updated config back to disk
+
+#### R9.5: Install AGENTS.md scoring system
+- Bundle the scoring system content inside the npm package (in `agents/TRACK_AGENTS.md`)
+- **If `~/.config/opencode/AGENTS.md` exists**:
+  - Read the existing file
+  - Merge in the scoring system sections that do not already exist (detect by heading markers)
+  - Write back the merged file
+  - Print a message indicating what was merged
+- **If `~/.config/opencode/AGENTS.md` does NOT exist**:
+  - Copy `TRACK_AGENTS.md` content as `~/.config/opencode/AGENTS.md`
+  - Print a message indicating the file was created
+
+#### R9.6: CI/Non-interactive detection
+- Detect non-interactive environments via:
+  - `process.env.CI` is set
+  - `process.env.NONINTERACTIVE` is set
+  - `!process.stdin.isTTY`
+- In non-interactive mode: auto-apply "skip-if-exists" defaults for all operations
+- In interactive mode: same behavior (skip-if-exists), but print informational messages to stdout
+
+#### R9.7: Error handling
+- The postinstall script MUST NOT cause `npm install` to fail
+- All operations should be wrapped in try/catch
+- Errors are logged to stderr with clear messages
+- The script exits with code 0 even on partial failure
+- Each operation is independent -- failure of one does not prevent others
+
+---
+
+## Package Changes
+
+### Files to bundle in npm package
+| Path (in package)                        | Source                                                      |
+|------------------------------------------|-------------------------------------------------------------|
+| `dist/`                                  | Built plugin files (already bundled)                        |
+| `skills/agile-spec-to-build/SKILL.md`    | Copy from `~/.config/opencode/skills/agile-spec-to-build/`  |
+| `skills/structured-review/SKILL.md`      | Copy from `~/.config/opencode/skills/structured-review/`     |
+| `agents/agents.json`                     | Extract from `~/.config/opencode/opencode.json` agent block  |
+| `agents/TRACK_AGENTS.md`                 | Scoring system content (derived from project AGENTS.md)      |
+| `scripts/postinstall.mjs`               | The postinstall script itself                                |
+
+### package.json changes
+```json
+{
+  "files": ["dist", "skills", "agents", "scripts/postinstall.mjs"],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs"
+  }
+}
+```
+
+---
+
+## Constraints
+
+| Constraint              | Value                                                    |
+|-------------------------|----------------------------------------------------------|
+| Path resolution         | `os.homedir()` + `path.join()`, never raw `~`            |
+| Conflict resolution     | Skip-if-exists for skills, agents, plugin entry          |
+| Plugin files             | Always overwrite (latest version wins)                   |
+| AGENTS.md               | Merge if exists, create if not                           |
+| Error behavior          | Never fail npm install (exit 0 always)                   |
+| CI detection            | `CI`, `NONINTERACTIVE` env vars, `!process.stdin.isTTY` |
+| Node.js                 | >=18.0.0 (can use fs/promises, ESM)                      |
+| Script format           | ESM (.mjs) -- no build step needed for postinstall       |
+| No dependencies         | Postinstall uses only Node.js built-ins (fs, path, os)   |
+
+---
+
+## Validation Criteria
+
+- [ ] `npm install` runs postinstall without errors
+- [ ] Plugin files copied to `~/.config/opencode/plugins/agent-tracker/`
+- [ ] Skills copied to `~/.config/opencode/skills/` (skipped if exists)
+- [ ] Agent definitions added to `opencode.json` (skipped if exists)
+- [ ] Plugin registered in `opencode.json` plugin array (skipped if present)
+- [ ] AGENTS.md created or merged at `~/.config/opencode/AGENTS.md`
+- [ ] Stale `file://` dev paths removed from plugin array
+- [ ] Non-interactive mode works without prompts
+- [ ] Script exits 0 even on partial failure
+- [ ] Running postinstall twice is idempotent (skip-if-exists)
+- [ ] All existing tests continue to pass
+
+---
+
+## Out of Scope
+
+- Uninstall script
+- Per-project init command
+- Interactive prompts for conflict resolution
+- Windows support (future consideration)
