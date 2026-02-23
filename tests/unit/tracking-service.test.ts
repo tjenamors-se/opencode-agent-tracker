@@ -408,3 +408,92 @@ describe('TrackingService', () => {
     });
   });
 });
+
+describe('TrackingService - branch coverage', () => {
+  let trackingService: TrackingService;
+  let mockDB: MockDatabase;
+  let writeBuffer: WriteBuffer;
+  let mockClient: any;
+
+  const makeAgent = (overrides: Partial<AgentData> = {}): AgentData => ({
+    id: 'test-agent',
+    name: 'Test Agent',
+    model: 'test-model',
+    scope: 'test',
+    skill_points: 1,
+    experience_points: 0,
+    communication_score: 60,
+    total_commits: 0,
+    total_bugs: 0,
+    active: true,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides
+  });
+
+  beforeEach(() => {
+    mockDB = new MockDatabase();
+    writeBuffer = new WriteBuffer();
+    mockClient = {
+      app: { log: jest.fn().mockResolvedValue(true) },
+      tui: { toast: { show: jest.fn().mockResolvedValue(true) } }
+    };
+    trackingService = new TrackingService(mockDB, writeBuffer, mockClient);
+  });
+
+  it('should trigger level-up on commitCompleted when XP reaches threshold', async () => {
+    await mockDB.putAgent('levelup-agent', makeAgent({
+      id: 'levelup-agent',
+      skill_points: 1,
+      experience_points: 9995
+    }));
+
+    await trackingService.commitCompleted('levelup-agent', 'abc', '/p', 'Task');
+    await trackingService.flushWriteBuffer();
+
+    const agent = await mockDB.getAgent('levelup-agent');
+    expect(agent?.skill_points).toBe(2);
+    expect(agent?.experience_points).toBe(0);
+    expect(mockClient.tui.toast.show).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: 'success' })
+    );
+  });
+
+  it('should trigger level-up on recordCommitGrade when XP reaches threshold', async () => {
+    await mockDB.putAgent('grade-levelup', makeAgent({
+      id: 'grade-levelup',
+      skill_points: 1,
+      experience_points: 9999
+    }));
+
+    await trackingService.recordCommitGrade('grade-levelup', 'abc', '/p', 1, 1);
+    await trackingService.flushWriteBuffer();
+
+    const agent = await mockDB.getAgent('grade-levelup');
+    expect(agent?.skill_points).toBe(2);
+    expect(agent?.experience_points).toBe(0);
+  });
+
+  it('should handle generateRetrospective with null agentId', async () => {
+    const session = { id: 'session-1' };
+    await expect(trackingService.generateRetrospective(session)).resolves.not.toThrow();
+  });
+
+  it('should handle finalizeSession with null agentId', async () => {
+    const session = { id: 'session-1' };
+    await expect(trackingService.finalizeSession(session)).resolves.not.toThrow();
+  });
+
+  it('should handle commitCompleted with non-existent agent', async () => {
+    await expect(
+      trackingService.commitCompleted('nonexistent', 'abc', '/p', 'Task')
+    ).resolves.not.toThrow();
+    expect(writeBuffer.isEmpty).toBe(true);
+  });
+
+  it('should handle recordCommunicationScore with non-existent agent', async () => {
+    await expect(
+      trackingService.recordCommunicationScore('nonexistent', 'abc', '/p', 2)
+    ).resolves.not.toThrow();
+  });
+});
