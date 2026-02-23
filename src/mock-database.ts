@@ -1,9 +1,12 @@
-import type { AgentData, CommitData, CommunicationScoreEvent } from './types.js'
+import type { Database } from './database.js'
+import type { AgentData, CommitData, CommunicationScoreEvent, RetrospectiveEntry, ActivityEntry } from './types.js'
 
-export class MockDatabase {
+export class MockDatabase implements Database {
   private agents: Map<string, AgentData> = new Map()
   private commits: Map<string, CommitData> = new Map()
   private communicationEvents: CommunicationScoreEvent[] = []
+  private retrospectives: Map<string, RetrospectiveEntry> = new Map()
+  private activities: Map<string, ActivityEntry> = new Map()
   public isAvailable: boolean = true
 
   constructor() {
@@ -18,20 +21,18 @@ export class MockDatabase {
 
   async getAgent(agentId: string): Promise<AgentData | null> {
     if (!this.isAvailable) return null
-    return this.agents.get(agentId) || null
+    return this.agents.get(agentId) ?? null
   }
 
   async putCommit(projectPath: string, commitHash: string, data: CommitData): Promise<boolean> {
     if (!this.isAvailable) return false
-    const key = `commit:${projectPath}:${commitHash}`
-    this.commits.set(key, data)
+    this.commits.set(`${projectPath}:${commitHash}`, data)
     return true
   }
 
   async getCommit(projectPath: string, commitHash: string): Promise<CommitData | null> {
     if (!this.isAvailable) return null
-    const key = `commit:${projectPath}:${commitHash}`
-    return this.commits.get(key) || null
+    return this.commits.get(`${projectPath}:${commitHash}`) ?? null
   }
 
   async putCommunicationEvent(event: CommunicationScoreEvent): Promise<boolean> {
@@ -46,11 +47,46 @@ export class MockDatabase {
     return events.slice(0, limit)
   }
 
+  async putRetrospective(agentId: string, commitHash: string, entry: RetrospectiveEntry): Promise<boolean> {
+    if (!this.isAvailable) return false
+    this.retrospectives.set(`${agentId}:${commitHash}`, entry)
+    return true
+  }
+
+  async getRetrospectives(agentId: string, limit: number = 100): Promise<RetrospectiveEntry[]> {
+    if (!this.isAvailable) return []
+    const entries: RetrospectiveEntry[] = []
+    for (const [key, value] of this.retrospectives) {
+      if (key.startsWith(`${agentId}:`)) {
+        entries.push(value)
+        if (entries.length >= limit) break
+      }
+    }
+    return entries
+  }
+
+  async putActivity(agentId: string, entry: ActivityEntry): Promise<boolean> {
+    if (!this.isAvailable) return false
+    this.activities.set(`${agentId}:${entry.timestamp}`, entry)
+    return true
+  }
+
+  async getActivities(agentId: string, limit: number = 100): Promise<ActivityEntry[]> {
+    if (!this.isAvailable) return []
+    const entries: ActivityEntry[] = []
+    for (const [key, value] of this.activities) {
+      if (key.startsWith(`${agentId}:`)) {
+        entries.push(value)
+        if (entries.length >= limit) break
+      }
+    }
+    return entries
+  }
+
   async close(): Promise<void> {
     this.isAvailable = false
   }
 
-  // Test helper methods
   setAvailable(available: boolean): void {
     this.isAvailable = available
   }
@@ -59,5 +95,7 @@ export class MockDatabase {
     this.agents.clear()
     this.commits.clear()
     this.communicationEvents = []
+    this.retrospectives.clear()
+    this.activities.clear()
   }
 }
