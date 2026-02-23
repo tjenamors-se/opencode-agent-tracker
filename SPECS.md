@@ -2,7 +2,7 @@
 
 **Status**: Draft
 **Date**: 2026-02-23
-**Scope**: LMDBDatabase path resolution, size limit, config support, data migration, write optimization, grading
+**Scope**: LMDBDatabase path resolution, size limit, config support, data migration, write optimization, grading, agent state management
 
 ---
 
@@ -40,6 +40,16 @@ Current write points per commit cycle:
 - `trackCommandCompletion` -> `incrementXP` -> `putAgent` (per command)
 - `commitCompleted` -> `putCommit` + `incrementXP` -> `putAgent` + `incrementCommitCount` -> `putAgent` (3 writes)
 - `recordCommunicationScore` -> `putCommunicationEvent` + `updateCommunicationScore` -> `putAgent` (2 writes)
+
+### Bug 4: Agent state managed outside the plugin
+**Files**: `.agent/status.json`, `.journal/communication.json`, `.journal/YYYY-MM-DD.md`
+
+Agent state (SP, XP, CS, commit counts, communication history, journal entries) is currently managed by manually writing JSON files from the shell via `cat` and `EOF`. This is:
+- **Error-prone**: Manual JSON construction can produce invalid state, wrong values, or missed updates
+- **Disconnected**: The `TrackingService` tracks the same data in LMDB but the project-local files are a separate, unsynchronized copy
+- **Not the plugin's job to delegate to shell**: The plugin should expose functions that the agent (or hooks) call to update state -- the plugin is the single source of truth
+
+The `TrackingService` already has `incrementXP`, `incrementCommitCount`, `updateCommunicationScore`, and `recordCommunicationScore` -- but these only write to LMDB. The project-local state files (`.agent/status.json`, `.journal/`) are not managed by any code.
 
 ### Missing: Configuration support
 `PluginConfig.databasePath` is defined in `src/types.ts` but never consumed. The plugin entry point (`src/index.ts:11`) instantiates `new LMDBDatabase()` with no arguments, ignoring any user configuration.
@@ -131,6 +141,74 @@ Add a new grade tier for exceptional collaboration:
 | `src/types.ts` | Update `grade` type to `-1 \| 1 \| 2 \| 5` |
 | `src/tracking-service.ts` | Accept grade `5` in `recordCommunicationScore` |
 
+### R8: Agent state management via TrackingService functions
+The `TrackingService` MUST be the single owner of agent state. No external process (shell, agent, user) should write state files directly. Instead, the plugin exposes functions that manage all state transitions.
+
+#### R8.1: Status management
+The `TrackingService` MUST provide methods to read and update agent status:
+- `getAgentStatus(agentId: string): Promise<AgentStatus>` -- returns current SP, XP, CS, commits, bugs, halted state
+- `reportBug(agentId: string): Promise<void>` -- decrements SP by 1, records the bug, checks for halt condition (SP <= 0)
+- `recordCommitGrade(agentId: string, commitHash: string, agentGrade: Grade, userGrade: Grade): Promise<void>` -- applies both grades to CS, stores retrospective entry, increments XP (+1 for successful commit)
+
+These methods buffer writes (per R6) -- they mutate in-memory state and flush on push/session end.
+
+#### R8.2: Communication journal management
+The `TrackingService` MUST provide a method to record retrospective entries:
+- `recordRetrospective(entry: RetrospectiveEntry): Promise<void>` -- stores the retrospective in the write buffer
+- `RetrospectiveEntry` type:
+  ```
+  {
+    commit: string
+    timestamp: string (ISO 8601)
+    task: string
+    agent_grade: Grade
+    user_grade: Grade
+    score_before: number
+    score_after: number
+    agent_note: string
+    user_note: string
+  }
+  ```
+- Retrospective history is stored in LMDB under `retrospective:<agent_id>:<commit_hash>` keys
+- No more manual `.journal/communication.json` file -- LMDB is the source of truth
+
+#### R8.3: Activity journal management
+The `TrackingService` MUST provide a method to log activity:
+- `logActivity(agentId: string, entry: ActivityEntry): Promise<void>` -- stores activity in the write buffer
+- `ActivityEntry` type:
+  ```
+  {
+    timestamp: string (ISO 8601)
+    task: string
+    actions: string
+    outcome: string
+    decisions: string
+  }
+  ```
+- Activity entries are stored in LMDB under `activity:<agent_id>:<timestamp>` keys
+- No more manual `.journal/YYYY-MM-DD.md` files -- LMDB is the source of truth
+
+#### R8.4: Project-local state files become read-only exports
+- `.agent/status.json` and `.journal/` files are NO LONGER the source of truth
+- The plugin MAY export/sync these files from LMDB for external tool consumption (e.g., so the agent can read `.agent/status.json`), but writes MUST go through `TrackingService` methods
+- Export is optional and happens during flush (R6), not on every mutation
+
+#### R8.5: Grade type
+Define a shared `Grade` type used across all grading:
+```
+type Grade = -1 | 1 | 2 | 5
+```
+Map to labels: `{ [-1]: 'bad', [1]: 'neutral', [2]: 'good', [5]: 'excellence' }`
+
+#### Affected files
+| File | Change |
+|------|--------|
+| `src/tracking-service.ts` | Add `getAgentStatus`, `reportBug`, `recordCommitGrade`, `recordRetrospective`, `logActivity` |
+| `src/types.ts` | Add `Grade`, `RetrospectiveEntry`, `ActivityEntry`, `AgentStatus` types |
+| `src/index.ts` | Wire new methods to appropriate hooks |
+| `src/lmdb-database.ts` | Add `putRetrospective`, `getRetrospectives`, `putActivity`, `getActivities` methods |
+| `src/database.ts` | Extend `Database` interface with new methods |
+
 ---
 
 ## Constraints
@@ -143,10 +221,11 @@ Add a new grade tier for exceptional collaboration:
 | Migration        | Additive only, no overwrites, idempotent |
 | Write strategy   | Buffer in memory, flush on push/session end |
 | Read strategy    | Always immediate, no caching needed      |
+| State ownership  | TrackingService is single source of truth |
 | Grade range      | -1, 1, 2, 5                             |
 | CS range per commit | -2 to +10 (both parties grade)        |
 | Error handling   | Graceful degradation, never crash host   |
-| Backwards compat | Existing `Database` interface unchanged  |
+| Backwards compat | Existing `Database` interface extended, not broken |
 | Node.js          | >=18.0.0                                 |
 
 ---
@@ -172,23 +251,31 @@ Add a new grade tier for exceptional collaboration:
 - [ ] Grade value `5` (Excellence) is accepted by `recordCommunicationScore`
 - [ ] `CommunicationScoreEvent.grade` type includes `5`
 - [ ] CS adjustment per commit ranges from -2 to +10
+- [ ] `getAgentStatus` returns current agent state from LMDB
+- [ ] `reportBug` decrements SP and checks halt condition
+- [ ] `recordCommitGrade` applies both agent and user grades to CS
+- [ ] `recordRetrospective` stores entry in LMDB under `retrospective:` key
+- [ ] `logActivity` stores entry in LMDB under `activity:` key
+- [ ] No agent state is written via shell commands or direct file manipulation
+- [ ] Project-local `.agent/status.json` is derived from LMDB, not the reverse
 - [ ] README documents both configuration options with examples
 - [ ] All existing tests continue to pass
-- [ ] New tests cover path resolution, size limit, config wiring, migration, write batching, and excellence grade
+- [ ] New tests cover path resolution, size limit, config wiring, migration, write batching, excellence grade, and state management functions
 
 ---
 
 ## Affected Files
 
-| File                      | Change Type    | Requirements |
-|---------------------------|----------------|--------------|
-| `src/lmdb-database.ts`    | Modify         | R1, R2, R3, R4, R6 |
-| `src/tracking-service.ts` | Modify         | R6, R7       |
-| `src/index.ts`            | Modify         | R3, R6       |
-| `src/types.ts`            | Modify         | R2, R3, R7   |
-| `README.md`               | Modify         | R5           |
-| `tests/unit/lmdb-database.test.ts` | Modify | R1, R2, R4, R6 |
-| `tests/unit/tracking-service.test.ts` | Modify | R6, R7    |
+| File                      | Change Type    | Requirements       |
+|---------------------------|----------------|--------------------|
+| `src/lmdb-database.ts`    | Modify         | R1, R2, R3, R4, R6, R8 |
+| `src/tracking-service.ts` | Modify         | R6, R7, R8         |
+| `src/index.ts`            | Modify         | R3, R6, R8         |
+| `src/types.ts`            | Modify         | R2, R3, R7, R8     |
+| `src/database.ts`         | Modify         | R8                 |
+| `README.md`               | Modify         | R5                 |
+| `tests/unit/lmdb-database.test.ts` | Modify | R1, R2, R4, R6, R8 |
+| `tests/unit/tracking-service.test.ts` | Modify | R6, R7, R8      |
 
 ---
 
