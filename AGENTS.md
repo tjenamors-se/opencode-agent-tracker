@@ -1,385 +1,181 @@
 # AGENTS.md - Coding Agent Guidelines
 
-This file contains development guidelines for agentic coding assistants working on this TypeScript/OpenCode plugin project.
+Guidelines for agentic coding assistants working on this TypeScript/OpenCode plugin.
 
 ## Project Overview
 
-**Package**: `@tjenamors.se/opencode-agent-tracker`  
-**Language**: TypeScript (strict mode) with ES Modules  
-**Target**: Node.js >=18.0.0, ES2022  
-**Framework**: OpenCode Plugin System  
-**Database**: LMDB (Lightning Memory-Mapped Database)  
-**Goal**: High-performance agent tracking for OpenCode
+| Field       | Value                                          |
+|-------------|------------------------------------------------|
+| Package     | `@tjenamors.se/opencode-agent-tracker`         |
+| Language    | TypeScript (strict mode), ES Modules           |
+| Target      | Node.js >=18.0.0, ES2022                       |
+| Framework   | OpenCode Plugin System                         |
+| Database    | LMDB (Lightning Memory-Mapped Database)        |
+| Runtime dep | `lmdb` (only one)                              |
 
-## Build/Lint/Test Commands
+## Commands
 
-### Core Development Commands
 ```bash
-# Install dependencies
-npm install
-
-# Build TypeScript to dist/
-npm run build
-
-# Type checking (essential for TypeScript strict mode)
-npm run typecheck
-
-# Linting
-npm run lint
-
-# Testing with coverage
-npm test
-
-# Run specific test file
-npm test -- tests/unit/env-protection.test.ts
-
-# Watch mode for tests
-npm run test:watch
-
-# Coverage reporting
-npm run test:coverage
-
-# Clean build artifacts
-npm run clean
-
-# Local plugin testing
-npm run test-local
-
-# Setup local symlink
-npm run setup-local
+npm run build          # tsc -> dist/
+npm run typecheck      # tsc --noEmit (run before every commit)
+npm run lint           # eslint src/**/*.ts
+npm test               # jest (263 tests, 80% coverage minimum)
+npm test -- tests/unit/env-protection.test.ts   # single test file
+npm run test:watch     # jest --watch
+npm run test:coverage  # jest --coverage
+npm run clean          # rm -rf dist coverage
 ```
 
-### Testing Strategy
-- **Target**: 80% test coverage minimum (configured in jest.config.cjs)
-- **Structure**: Unit tests in `tests/unit/`
-- **Pattern**: All new code must include corresponding tests
-- **Debug**: Use `npm run test:watch` for development
-- **Coverage**: Excludes `index.ts` and `types.ts` from coverage requirements
-
-## Agent Scoring System
-
-### Overview
-
-Agents are tracked by three metrics: **SP** (Skill Points), **XP** (Experience Points),
-and **CS** (Communication Score). SP is the primary indicator of agent competence within
-its scope. Higher SP means the agent has proven itself and can be trusted with more
-autonomy.
-
-### Skill Points (SP)
-
-SP is the main score showing how good the agent is in its scope. Every agent starts
-at **1 SP**. SP can only be gained through XP exchange and lost through bug penalties.
-
-**SP exchange:** Spend `10 * current_SP` XP to gain +1.0 SP. Leftover XP is kept.
-
-**SP trust tiers:**
-
-| SP    | Trust Level  | Agent Behavior                                           |
-|-------|-------------|----------------------------------------------------------|
-| 0-1   | Probation   | Full verification required. Must confirm every action.   |
-| 2-3   | Junior      | Standard rules apply. Full retrospectives.               |
-| 4-6   | Established | May take initiative on familiar patterns. Less overhead. |
-| 7-9   | Senior      | High trust. Minimal confirmation for known work.         |
-| 10+   | Expert      | Deep trust earned. Maximum autonomy within scope.        |
-
-**Bug penalty:** SP * 0.5 (halved). XP reset to 0.0. CS * 0.5 (halved).
-
-### Experience Points (XP)
-
-XP is earned through successful work and spent to gain SP.
-
-**XP sources:**
-
-| Event                        | No bugs                  | With bugs                              |
-|------------------------------|--------------------------|----------------------------------------|
-| Commit                       | +1 XP                   | XP * 0.5 (halved retroactively)        |
-| Push                         | +10 XP                  | XP * 0.5 (halved retroactively)        |
-| Sprint done                  | +10 XP                  | -1 XP per bug + XP * 0.5              |
-| Sprint perfect (0 bugs)      | +100 XP                 | n/a                                    |
-| Epic done                    | +100 XP                 | -100 XP (retroactive)                  |
-| Semver bump                  | +1000 XP                | -1000 XP + XP * 0.75 (retroactive)    |
-
-**Semver bumps are high-stakes.** The agent must be very careful to reach this
-milestone without introducing bugs. The reward is massive but so is the penalty.
-
-### Communication Score (CS)
-
-CS tracks collaboration quality. It is a currency that can be exchanged for XP.
-
-**CS cap:** `SP * 100`. Higher SP unlocks higher CS potential.
-
-**CS grades (after each mini-retrospective):**
-
-| Grade      | Points | When to use                                      |
-|------------|--------|--------------------------------------------------|
-| Bad        | -1     | Miscommunication, wrong assumptions, wasted work |
-| Neutral    | +1     | Acceptable, nothing special, still learning      |
-| Good       | +2     | Clear communication, correct execution, smooth   |
-| Excellence | +5     | Exceptional alignment, proactive, insightful     |
-
-Both agent and user grade each interaction (so CS changes by -2 to +10 per retrospective).
-
-### CS → XP Exchange
-
-CS is spent (like currency) to gain XP. The exchange rate is based on fibonacci:
-
-**Rate:** `fib(floor(current_CS / 20))` XP per 1.0 CS spent
-
-| CS range | fib index | XP per 1.0 CS spent |
-|----------|-----------|---------------------|
-| 0-19     | fib(0)    | 0.0                 |
-| 20-39    | fib(1)    | 1.0                 |
-| 40-59    | fib(2)    | 1.0                 |
-| 60-79    | fib(3)    | 2.0                 |
-| 80-99    | fib(4)    | 3.0                 |
-| 100-119  | fib(5)    | 5.0                 |
-| 120-139  | fib(6)    | 8.0                 |
-| 140-159  | fib(7)    | 13.0                |
-| 160+     | fib(8)    | 21.0                |
-
-**Exchange rules:**
-- All available CS is spent on each exchange (full conversion)
-- Exchange is checked automatically after each mini-retrospective
-- CS below 20 cannot be exchanged (fib(0) = 0)
-
-### Post-Retrospective Flow
-
-After every mini-retrospective, the following checks run in order:
-
-1. Apply CS grade changes (agent grade + user grade)
-2. **CS → XP exchange:** If CS >= 20, spend all CS, gain `CS_spent * fib(floor(CS / 20))` XP
-3. **XP → SP exchange:** If XP >= `10 * current_SP`, spend that amount, gain +1.0 SP
-
-### Work Structure
-
-- **Bug fixes** happen outside sprints and epics. No sprint/epic XP for bug work.
-- **New features** require new epics and sprints via the agile-spec-to-build workflow:
-  - `spec-agent` for requirements discovery (SPECS.md)
-  - `brainstorm` for creative exploration (BRAINSTORM.md)
-  - `architect-plan` for formal planning (PLAN.md)
-  - `engineer-build` for implementation
-- Each sprint produces one or more commits. A sprint with zero bugs earns the
-  "perfect run" bonus (+100 XP).
-
-### Tracking
-
-SP, XP, and CS are tracked in `.agent/status.json`:
-
-```json
-{
-  "agent_name": "AgentTracker-Core",
-  "skill_points": 0.7,
-  "experience_points": 1.0,
-  "total_commits": 27.0,
-  "total_bugs": 3.0,
-  "halted": false,
-  "communication_score": 25.7
-}
+**Verification gate** (must pass before every commit):
+```bash
+npm run typecheck && npm run lint && npm test
 ```
 
-All numeric values use 1-decimal floats (`.toFixed(1)`).
-
-### Mini-Retrospective Format
-
-After every commit, the agent asks:
+## Project Structure
 
 ```
-Retrospective:
-- What went well:   [agent's assessment]
-- What could improve: [agent's assessment]
-- My grade: [bad/neutral/good/excellence]
-- Your grade? [bad/neutral/good/excellence]
-[CS: XX.X | XP: XX.X | SP: XX.X]
+src/
+  index.ts               # Plugin entry, hooks, tools, default export
+  types.ts               # All type definitions (single file)
+  database.ts            # Database interface (22 methods)
+  lmdb-database.ts       # LMDB implementation, 7 sub-databases
+  mock-database.ts       # In-memory mock for tests
+  tracking-service.ts    # SP/XP/CS scoring, health checks, caching
+  write-buffer.ts        # Batched write buffer, monotonic counter keys
+  query-service.ts       # Keyword search, scoring, git log fallback
+  project-classifier.ts  # AGENTS.md parsing, manifest detection
+  health-display.ts      # ASCII health status HUD
+  env-protection.ts      # Blocks reads/edits of .env files
+  migration.ts           # Per-project -> centralized DB migration
+  dependency-checker.ts  # LMDB dependency validation
+tests/unit/              # One test file per source module
+skills/                  # OpenCode skill definitions (installed by postinstall)
+agents/                  # Agent definitions + scoring docs (installed by postinstall)
+scripts/postinstall.mjs  # Copies plugin, skills, agents to ~/.config/opencode/
 ```
 
-## Code Style Guidelines
+## TypeScript Strictness
 
-### TypeScript Configuration
-The project uses strict TypeScript with comprehensive checks:
-```json
-{
-  "strict": true,
-  "noImplicitAny": true,
-  "noImplicitReturns": true,
-  "noUncheckedIndexedAccess": true,
-  "strictNullChecks": true,
-  "forceConsistentCasingInFileNames": true
-}
-```
+Key flags beyond `strict: true`:
+- `noUncheckedIndexedAccess` -- indexed access returns `T | undefined`
+- `exactOptionalPropertyTypes` -- only set optional fields when value is defined
+- `noImplicitReturns` -- every code path must return
+- `noImplicitOverride` -- override keyword required
 
-### Variable Naming
+## Code Style
+
+**No semicolons** in source files. Test files use semicolons.
+
+### Naming
+
+| Kind            | Convention       | Example                          |
+|-----------------|------------------|----------------------------------|
+| Variables/funcs | `camelCase`      | `writeBuffer`, `extractAgentId`  |
+| Classes         | `PascalCase`     | `LMDBDatabase`, `QueryService`   |
+| Interfaces      | `PascalCase`     | `AgentData`, `DatabaseConfig`    |
+| Types           | `PascalCase`     | `PluginConfig`, `Grade`          |
+| Constants       | `UPPER_SNAKE`    | `DEFAULT_PATH`, `STOP_WORDS`     |
+| Files           | `kebab-case.ts`  | `lmdb-database.ts`               |
+
+No `I` prefix on interfaces. No `T` prefix on types.
+
+### Imports
+
+Order: Node builtins, external deps, internal modules, type-only imports.
+**All internal imports use `.js` extension** (Node16 module resolution).
+
 ```typescript
-const camelCaseVariable = 'value'      // Variables and functions
-class PascalCaseClass {}               // Classes
-export interface IPascalCaseInterface {} // Interfaces
-const UPPER_SNAKE_CASE = 'CONSTANT'    // Constants
-```
-
-### Import Organization
-```typescript
-// External dependencies first
+import { readFileSync } from 'fs'
 import { open } from 'lmdb'
-
-// Internal modules grouped by functionality
-import { EnvProtection } from '../env-protection'
-import { TrackingService } from '../tracking-service'
-
-// Type imports (when not used in runtime)
-import type { AgentData, PluginConfig } from '../types'
+import { EnvProtection } from './env-protection.js'
+import type { AgentData } from './types.js'
 ```
 
-### Error Handling Pattern
+### Error Handling
+
+The plugin must **never crash the host**. Every public method catches errors
+and returns a safe fallback (`false`, `null`, `[]`).
+
 ```typescript
-// Always handle errors gracefully with clear messages
-try {
-  await someOperation()
-} catch (error) {
-  console.error('Operation failed:', error)
-  // Graceful degradation when possible
-  return fallbackOption()
-}
+// Prefix unused error params with underscore
+catch (_error) { return false }
 
-// Use specific error types when available
-if (error instanceof DatabaseError) {
-  handleDatabaseError(error)
-} else {
-  handleGenericError(error)
-}
+// Stringify errors with String(), not .message (handles non-Error objects)
+result.errors.push(`Failed: ${String(error)}`)
+
+// Guard clauses at method start
+if (!this.isAvailable || !this.agentsDB) return null
+
+// Fire-and-forget logging (never await, never throw)
+client?.app?.log?.('message')?.catch?.(() => {})
 ```
 
-### Function Documentation (JSDoc)
-```typescript
-/**
- * Validates file paths against .env patterns
- * @param filePath - Path to check for .env protection
- * @returns True if file matches .env pattern
- */
-private isEnvFile(filePath: string): boolean {
-  // Implementation
-}
-```
+### Documentation
+
+JSDoc on all public methods. Use `@param`, `@returns`. Include requirement
+refs like `(R1, R3)`. No inline comments explaining what code does.
 
 ### ESLint Rules
-The project uses basic ESLint with TypeScript support:
+
 - `@typescript-eslint/no-unused-vars` with `argsIgnorePattern: '^_'`
 - `prefer-const` enforced
 - `no-var` enforced
 
-## Project-Specific Patterns
+## Testing
 
-### LMDB Database Usage
+- **Framework**: Jest 29 with `babel-jest` (not `ts-jest`)
+- **Coverage**: 80% minimum (branches, functions, lines, statements)
+- **Excluded from coverage**: `index.ts`, `types.ts`
+- **Mock database**: Use `MockDatabase` from `src/mock-database.ts`, not real LMDB
+- **Imports in tests**: No `.js` extension (babel handles resolution)
+- **LMDB `:memory:` databases share state** across tests in the same suite --
+  use unique agent/key IDs per test
+
+Test patterns:
 ```typescript
-// Use memory-mapped database for performance
-import { open } from 'lmdb'
+import { EnvProtection } from '../../src/env-protection';
+// Semicolons in test files, no semicolons in source files
 
-// Database operations should handle errors gracefully
-async function storeAgentData(agentId: string, data: AgentData) {
-  try {
-    await db.put(`agent:${agentId}`, data)
-  } catch (error) {
-    console.error('Failed to store agent data:', error)
-    // Continue without tracking when database fails
-  }
-}
+describe('EnvProtection', () => {
+  let envProtection: EnvProtection;
+  beforeEach(() => { envProtection = new EnvProtection(); });
+
+  it('blocks .env reads', () => {
+    // Private method access via bracket notation
+    expect(envProtection['isEnvFile']('.env')).toBe(true);
+  });
+});
 ```
 
-### OpenCode Plugin Integration
-```typescript
-// Plugin structure expects export and opencode property
-import { opencodeHook } from '@opencode-ai/plugin'
+## Key Architectural Patterns
 
-export const plugin = {
-  name: 'agent-tracker',
-  hooks: {
-    'tool.execute.before': async (input) => {
-      // Plugin logic
-    }
-  }
-}
-```
+### Database Abstraction
+`Database` interface in `database.ts` with two implementations: `LMDBDatabase`
+(production, 7 sub-databases) and `MockDatabase` (tests, in-memory Maps).
 
-### Environment File Protection
-```typescript
-// Strict protection against .env file operations
-if (tool === 'read' && this.isEnvFile(args.filePath)) {
-  throw new Error('Do not read .env files')
-}
-```
+### Write Buffering
+All mutations go through `WriteBuffer` (monotonic counter keys). Flushed at
+session end via `TrackingService.finalizeSession()`. Last-write-wins.
 
-## Naming Conventions
-
-### File Organization
-```
-src/
-├── index.ts              # Main plugin entry point
-├── env-protection.ts    # .env file protection system
-├── lmdb-database.ts     # LMDB wrapper and database operations
-├── tracking-service.ts  # XP/SP and communication score tracking
-├── dependency-checker.ts # Plugin dependency validation
-└── types.ts            # TypeScript type definitions
-
-tests/
-└── unit/               # Unit tests separated by functionality
-```
-
-### Key Patterns
-- **Prefix-based keys**: `agent:${id}` for database keys
-- **Error messages**: Clear, specific error messages for each failure scenario
-- **Configuration**: Central configuration via PluginConfig interface
-
-## Development Workflow
-
-### Before Committing Code
-- [ ] Run `npm run typecheck` - No TypeScript errors
-- [ ] Run `npm run lint` - Linting passes  
-- [ ] Run `npm test` - All tests pass
-- [ ] Test coverage meets minimum 80% requirement
-- [ ] New functionality includes unit tests
-- [ ] Documentation updated if API changed
-
-### Code Quality
-- Follow existing patterns and style
-- Use TypeScript strictly typed approach
-- Handle errors gracefully with proper error messages
-- Write tests for new functionality
-- Maintain 80%+ test coverage
-
-## Plugin-Specific Notes
+### Prefix-Based Keys
+Database keys use prefixes for routing:
+`agent:${id}`, `commit:${path}:${hash}`, `communication:${id}:${hash}:${ts}`
 
 ### Graceful Degradation
-The plugin must continue functioning even when LMDB is unavailable:
-- Log warnings when degraded mode activated
-- Provide basic functionality without tracking
-- Never crash OpenCode session
+Plugin initializes even when LMDB fails. Every operation checks `db.isAvailable`
+first. Database path: `~/.config/opencode/agent-tracker.lmdb` (centralized).
 
-### Data Privacy
-- Store data locally only (user's home directory)
-- No external API calls or data transmission
-- Clear data boundaries between plugin and OpenCode
+### LMDB Specifics
+- `get()` is synchronous (memory-mapped), `put()` returns Promise
+- `getRange()` returns synchronous iterator
+- `close()` on sub-databases can throw if Dbi already closed -- wrap in try/catch
+- `open({ path })` creates path as a file, not directory -- use `dirname()`
 
-## Troubleshooting
+## Pre-Commit Checklist
 
-### Common Issues
-- **LMDB not available**: Plugin runs in degraded mode
-- **TypeScript errors**: Check `npm run typecheck` output
-- **Test failures**: Use `npm run test:coverage` for details
-- **Jest ESM issues**: Configured via ts-jest with ESM support
-
-### Debug Commands
-```bash
-# Check TypeScript issues
-npm run typecheck
-
-# Run specific test with debugging
-npm run test:watch tests/unit/env-protection.test.ts
-
-# Reset environment
-npm run clean && npm test
-
-# Local testing
-npm run test-local
-```
-
----
-
-*Remember: This plugin is built for reliability and security. Always prioritize data integrity and graceful error handling.*
+1. `npm run typecheck` passes
+2. `npm run lint` passes
+3. `npm test` passes (263 tests, 80% coverage)
+4. New code has corresponding tests
+5. No `.env` files or secrets committed
+6. All internal imports use `.js` extension
