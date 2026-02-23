@@ -27,20 +27,28 @@ function resolveDatabaseConfig(pluginConfig: PluginConfig): DatabaseConfig {
  * Formats AgentHealthStatus into a human-readable status block for toasts/logs.
  */
 function formatHealthStatus(health: AgentHealthStatus): string {
-  const lines: string[] = []
-  lines.push(`--- Agent Status: ${health.agent_id} ---`)
-  lines.push(`SP: ${health.skill_points} | XP: ${health.experience_points} | CS: ${health.communication_score}`)
-  lines.push(`Commits: ${health.total_commits} | Bugs: ${health.total_bugs}`)
-  lines.push(`Halted: ${health.halted ? 'YES' : 'no'}`)
+  const spLevelUp = (10 * health.skill_points).toFixed(1)
+  const content: string[] = []
+  content.push(`Agent: ${health.agent_id}`)
+  content.push(`SP: ${health.skill_points} | XP: ${health.experience_points} | CS: ${health.communication_score}`)
+  content.push(`Commits: ${health.total_commits} | Bugs: ${health.total_bugs}`)
+  content.push(`Halted: ${health.halted ? 'YES' : 'no'}`)
+  content.push(`SP level-up at: ${spLevelUp} XP (10 * ${health.skill_points})`)
   if (health.pending_changes.length > 0) {
-    lines.push(`Pending changes (${health.pending_changes.length}):`)
+    content.push(`Pending changes (${health.pending_changes.length}):`)
     for (const change of health.pending_changes) {
-      lines.push(`  ${change}`)
+      content.push(`  ${change}`)
     }
   } else {
-    lines.push('Pending changes: none')
+    content.push('Pending changes: none')
   }
-  return lines.join('\n')
+
+  const maxLen = content.reduce((max, line) => Math.max(max, line.length), 0)
+  const top = '\u250C' + '\u2500'.repeat(maxLen + 2) + '\u2510'
+  const bottom = '\u2514' + '\u2500'.repeat(maxLen + 2) + '\u2518'
+  const padded = content.map(line => '\u2502 ' + line.padEnd(maxLen) + ' \u2502')
+
+  return [top, ...padded, bottom].join('\n')
 }
 
 const AgentTrackerPlugin: Plugin = async (context: any) => {
