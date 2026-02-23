@@ -1,9 +1,9 @@
 {
   "agent_name": "AgentTracker-Core",
-  "skill_points": 0.5,
-  "experience_points": 15.0,
-  "total_commits": 17.0,
-  "total_bugs": 1.0,
+  "skill_points": 0.3,
+  "experience_points": 0.0,
+  "total_commits": 20.0,
+  "total_bugs": 2.0,
   "halted": false,
-  "communication_score": 100.9
+  "communication_score": 27.3
 }

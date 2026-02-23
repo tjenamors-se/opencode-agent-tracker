@@ -75,5 +75,60 @@
     "score_after": 97,
     "agent_note": "Clean wiring. Inline tool definition sidesteps Jest/TS resolution issue. Cleanup is non-fatal.",
     "user_note": ""
+  },
+  {
+    "commit": "29c673f",
+    "timestamp": "2026-02-24T00:00:00",
+    "task": "Fix mkdirSync bug (Bug #1)",
+    "agent_grade": "bad",
+    "user_grade": "bad",
+    "score_before": 97,
+    "score_after": 48.5,
+    "agent_note": "Bug #1: mkdirSync created LMDB path as directory. SP 1.0 -> 0.5, XP -> 0.0, CS 97 -> 48.5 (50% penalty)",
+    "user_note": "Bug penalty applied"
+  },
+  {
+    "commit": "af6ba2d",
+    "timestamp": "2026-02-24T00:15:00",
+    "task": "SP penalty tracking commit",
+    "agent_grade": "neutral",
+    "user_grade": "neutral",
+    "score_before": 48.5,
+    "score_after": 50.5,
+    "agent_note": "Tracking commit for bug penalty",
+    "user_note": ""
+  },
+  {
+    "commit": "d34f8c6",
+    "timestamp": "2026-02-24T00:30:00",
+    "task": "Update SP/XP/CS rules to floats",
+    "agent_grade": "neutral",
+    "user_grade": "neutral",
+    "score_before": 50.5,
+    "score_after": 52.5,
+    "agent_note": "Rule update tracking commit",
+    "user_note": ""
+  },
+  {
+    "commit": "dd92fa3",
+    "timestamp": "2026-02-24T00:45:00",
+    "task": "CS update tracking commit",
+    "agent_grade": "neutral",
+    "user_grade": "neutral",
+    "score_before": 52.5,
+    "score_after": 54.5,
+    "agent_note": "Tracking commit",
+    "user_note": ""
+  },
+  {
+    "commit": "fd6e635",
+    "timestamp": "2026-02-24T02:00:00",
+    "task": "Auto-migration on session.created (Bug #2: delayed commit)",
+    "agent_grade": "bad",
+    "user_grade": "bad",
+    "score_before": 54.5,
+    "score_after": 27.3,
+    "agent_note": "Bug #2: Failed to commit verified work immediately. Asked unnecessary questions instead of executing. SP 0.5 -> 0.3, XP -> 0.0, CS 54.5 -> 27.3 (50% penalty)",
+    "user_note": "Should have been committed already"
   }
 ]
