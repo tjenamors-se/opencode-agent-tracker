@@ -437,3 +437,79 @@ A single postinstall script (`scripts/postinstall.mjs`) that runs after `npm ins
 - Per-project init command
 - Interactive prompts for conflict resolution
 - Windows support (future consideration)
+
+---
+
+## R10: Health Status Display Redesign (FIGlet + Tron RPG Player Sheet)
+
+**User Story:** As a user, I want the agent health status displayed as a Tron-style RPG player sheet with FIGlet ASCII art agent name, so that the status looks cool and the box alignment bug is fixed.
+
+### R10.1: FIGlet Agent Name Header
+- Agent name rendered using the `figlet` npm package with `Cybermedium` font
+- Output must fit within 60 columns max width
+- If agent name is too long for 60 columns, fall back gracefully (truncate or use smaller font)
+
+### R10.2: Tron RPG Player Sheet Layout
+- Stats presented in a minimalist Tron-themed layout
+- **No borders** — use indentation and spacing only (no Unicode box-drawing characters)
+- Max width: 60 columns
+- Must render correctly in:
+  - OpenCode TUI toast (`client.tui.toast.show`)
+  - Chat code blocks (monospace markdown)
+  - Terminal stdout
+
+### R10.3: Stats Content
+- **Trust Tier label** derived from SP (PROBATION, JUNIOR, ESTABLISHED, SENIOR, EXPERT)
+- **XP progress bar** showing progress toward next SP level-up (`10 * current_SP` XP threshold)
+- SP, XP, CS values (1-decimal floats)
+- Commits and Bugs counts (1-decimal floats)
+- Halted status (YES/no)
+- Pending changes (count + list if any)
+
+### R10.4: ASCII Progress Bar
+- Visual bar showing XP progress toward SP level-up threshold
+- Pure ASCII characters only (e.g., `[====------]` or similar)
+- Percentage display alongside bar
+
+### R10.5: No Unicode Box-Drawing
+- Must NOT use any Unicode box-drawing characters (U+2500-U+257F range)
+- All visual structure via ASCII-only characters, spacing, and indentation
+- This fixes the East Asian Width alignment bug permanently
+
+### R10.6: Dependencies
+- Add `figlet` (^1.10.0) as a runtime dependency
+- Add `@types/figlet` as a devDependency
+- `figlet.textSync()` for synchronous rendering (formatHealthStatus is sync)
+
+### R10.7: Backward Compatibility
+- `formatHealthStatus()` signature unchanged: `(health: AgentHealthStatus) => string`
+- Same call sites in `guardAgentHealth()` and `showHealthStatus()`
+- No changes to `AgentHealthStatus` type
+
+---
+
+## Constraints
+
+| Constraint              | Value                                    |
+|-------------------------|------------------------------------------|
+| FIGlet font             | Cybermedium                              |
+| Max width               | 60 columns                               |
+| Border style            | None — spacing/indentation only          |
+| Progress bar            | Pure ASCII                               |
+| Unicode box-drawing     | FORBIDDEN (U+2500-U+257F)               |
+| Function signature      | Unchanged                                |
+| Dependencies            | figlet (runtime), @types/figlet (dev)    |
+
+---
+
+## Validation Criteria
+
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] `npm test` passes (all 138+ tests)
+- [ ] `formatHealthStatus()` output contains FIGlet-rendered agent name
+- [ ] Output fits within 60 columns
+- [ ] No Unicode box-drawing characters in output
+- [ ] Trust tier label displayed correctly for each SP range
+- [ ] XP progress bar renders correctly
+- [ ] All existing call sites work without changes

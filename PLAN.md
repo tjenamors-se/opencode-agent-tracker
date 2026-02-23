@@ -512,3 +512,81 @@ M11-M13 are independent asset bundling (can be done in parallel but will be comm
 ## Context Summary (Phase 3 Complete)
 
 Blueprint ready. 8 milestones (M11-M18) covering asset bundling and postinstall script construction. Strategy B chosen: modular .mjs with independent helper functions. Each milestone = one commit. Verification at every step.
+
+---
+
+## R10: Health Status Display Redesign (FIGlet + Tron HUD)
+
+**Strategy:** B (Tron HUD Panel)
+**Dependencies:** `figlet` (runtime), `@types/figlet` (dev)
+
+### M19: Add figlet dependency + helper module
+
+- `npm install figlet && npm install -D @types/figlet`
+- Create `src/health-display.ts` with:
+  - `renderAgentName(name: string): string` — FIGlet rendering with Cybermedium font, 60-col truncation fallback
+  - `getTrustTier(sp: number): string` — Maps SP to tier label (PROBATION/JUNIOR/ESTABLISHED/SENIOR/EXPERT)
+  - `renderProgressBar(current: number, max: number, width: number): string` — ASCII progress bar
+  - `formatHealthStatus(health: AgentHealthStatus): string` — Full Tron HUD layout
+- Export `formatHealthStatus` from new module
+- Unit tests for all helper functions in `tests/unit/health-display.test.ts`
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+### M20: Wire new formatHealthStatus into plugin entry
+
+- Update `src/index.ts`:
+  - Remove old `formatHealthStatus()` function
+  - Import `formatHealthStatus` from `./health-display.js`
+- Ensure all existing call sites (`guardAgentHealth`, `showHealthStatus`) use new import
+- All existing tests must pass without changes
+
+**Verification:** `npm run typecheck` + `npm run lint` + `npm test`
+
+---
+
+### Module Interface Contract
+
+```typescript
+// src/health-display.ts
+
+import type { AgentHealthStatus } from './types.js'
+
+/**
+ * Renders agent name as FIGlet ASCII art using Cybermedium font.
+ * Falls back to plain text if name exceeds 60 columns when rendered.
+ */
+export function renderAgentName(name: string): string
+
+/**
+ * Maps SP value to trust tier label.
+ */
+export function getTrustTier(sp: number): string
+
+/**
+ * Renders ASCII progress bar.
+ * Example: [=========-----------] 66%
+ */
+export function renderProgressBar(current: number, max: number, width: number): string
+
+/**
+ * Formats full Tron HUD player sheet from AgentHealthStatus.
+ */
+export function formatHealthStatus(health: AgentHealthStatus): string
+```
+
+### Milestone Summary
+
+| Milestone | Task | Files | Size |
+|-----------|------|-------|------|
+| M19 | figlet dep + health-display module + tests | src/health-display.ts, tests/unit/health-display.test.ts, package.json | Medium |
+| M20 | Wire into index.ts, remove old function | src/index.ts | Small |
+
+### Dependency Tree
+
+```
+M19 -> M20
+```
+
+M19 creates the module with all logic and tests. M20 wires it in and removes the old code.
+

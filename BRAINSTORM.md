@@ -450,3 +450,101 @@ TypeScript adds build coupling risk. The postinstall script is a simple filesyst
 ---
 
 **Architectural paths explored in BRAINSTORM.md. Use `architect-plan` to map the build.**
+
+---
+
+## R10: Health Status Display Redesign — Brainstorm
+
+### Strategy A: Minimal Tron Grid
+
+Simple, clean layout with FIGlet header + labeled stat rows using pure spacing.
+
+```
+____ ____ ____ _  _ ___
+|__| | __ |___ |\ |  |
+|  | |__] |___ | \|  |
+
+  CLASS    JUNIOR          SP  2.7
+  XP      17.7 / 27.0
+  [=========-----------]   66%
+  CS      0.0
+  COMMITS 36.0    BUGS 3.0
+  HALTED  no
+```
+
+**Pros:** Dead simple. No borders = no alignment bugs. Easy to maintain. Fits 60 cols easily.
+**Cons:** May look too plain. Less "Tron" feel.
+
+### Strategy B: Tron HUD Panel
+
+Structured sections with ASCII separators (dashes, equals) and alignment.
+
+```
+____ ____ ____ _  _ ___
+|__| | __ |___ |\ |  |
+|  | |__] |___ | \|  |
+
+  ============== IDENTITY ==============
+  CLASS : JUNIOR            TIER : 2-3
+  =============== STATS ================
+  SP    : 2.7       CS    : 0.0
+  XP    : 17.7 / 27.0
+  [==========----------]  66%
+  =============== RECORD ===============
+  COMMITS : 36.0    BUGS  : 3.0
+  HALTED  : no
+  ======================================
+```
+
+**Pros:** Strong visual structure. Tron HUD aesthetic. Clear section grouping.
+**Cons:** More complex to implement. Section separators add lines.
+
+### Strategy C: Compact Data Block
+
+Maximum information density. Two-column layout where possible.
+
+```
+____ ____ ____ _  _ ___
+|__| | __ |___ |\ |  |
+|  | |__] |___ | \|  |
+
+  JUNIOR | SP 2.7 | CS 0.0 | XP 17.7/27.0
+  [==========----------] 66%
+  COMMITS 36.0 | BUGS 3.0 | HALTED no
+  PENDING none
+```
+
+**Pros:** Very compact — 4 lines of stats. Quick scan.
+**Cons:** Dense. Less RPG feel. Pipe separators may feel like tables not Tron.
+
+### Trade-off Matrix
+
+| Aspect          | Strategy A      | Strategy B       | Strategy C      |
+|-----------------|-----------------|------------------|-----------------|
+| Complexity      | Low             | Medium           | Low             |
+| Tron aesthetic  | Weak            | Strong           | Medium          |
+| Readability     | Good            | Excellent        | Good (dense)    |
+| Width control   | Easy            | Medium           | Easy            |
+| Maintainability | Simple          | Moderate         | Simple          |
+| RPG feel        | Minimal         | Strong           | Weak            |
+| Lines of output | ~8              | ~12              | ~6              |
+
+### Edge Cases
+
+1. **Long agent names**: "AgentTracker-Core" = 58 cols. Names >12 chars may exceed 60 cols. Need truncation or `Cybersmall` fallback.
+2. **XP/SP at zero**: Progress bar shows 0%. Display `[--------------------] 0%`.
+3. **CS at cap**: When CS is at `SP * 100`, could show "(MAX)" label.
+4. **Many pending changes**: List could exceed toast height. Limit to first 5 with "+ N more".
+5. **Halted agent**: When halted, could add a warning line/banner.
+
+### Risk Assessment
+
+- **FIGlet bundle size**: `figlet` package includes font files (~300KB). Could impact install size. Acceptable for dev tooling.
+- **FIGlet sync API**: `textSync()` is synchronous — safe for our sync `formatHealthStatus()`.
+- **Font availability**: Cybermedium is bundled with figlet. No external font loading needed.
+- **Testing**: Need to mock `figlet.textSync()` in tests to avoid font file dependency.
+
+### Recommendation
+
+**Strategy B (Tron HUD Panel)** — it has the strongest Tron aesthetic and RPG player sheet feel. The section separators (`===`) create visual structure without Unicode box-drawing. It's more lines but within toast limits and provides the best user experience.
+
