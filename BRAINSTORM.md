@@ -271,3 +271,182 @@ src/
 ---
 
 **Architectural paths explored. Use `architect-plan` to map the build.**
+
+---
+
+# BRAINSTORM: NPM Postinstall Setup (R9)
+
+**Date**: 2026-02-23
+**Input**: SPECS.md R9 (R9.1-R9.7)
+
+---
+
+## Problem Analysis
+
+The postinstall script must perform 5 independent filesystem operations after npm install:
+1. Copy plugin dist/ to ~/.config/opencode/plugins/agent-tracker/
+2. Copy 2 skill directories to ~/.config/opencode/skills/
+3. Merge 4 agent definitions into opencode.json
+4. Register plugin path in opencode.json plugin array
+5. Create or merge AGENTS.md scoring system
+
+Key constraints: exit 0 always, skip-if-exists, no dependencies (Node.js built-ins only), ESM (.mjs).
+
+---
+
+## Strategy A: Single Sequential Script
+
+### Approach
+One `scripts/postinstall.mjs` file that runs all 5 operations sequentially. Each operation wrapped in try/catch. Uses only `fs`, `path`, `os`.
+
+### Structure
+```
+scripts/postinstall.mjs      (~200 lines)
+skills/                       (bundled skill files)
+agents/agents.json            (bundled agent definitions)
+agents/TRACK_AGENTS.md        (bundled scoring system)
+```
+
+### Trade-offs
+| Dimension        | Rating | Notes |
+|------------------|--------|-------|
+| Complexity       | Low    | One file, linear flow |
+| Maintainability  | Medium | 200+ lines in one file |
+| Testability      | Low    | Hard to unit test (fs operations) |
+| Error isolation  | Good   | Each op independent, try/catch |
+| Dependencies     | None   | Node.js built-ins only |
+
+---
+
+## Strategy B: Modular Script with Helper Functions
+
+### Approach
+One `scripts/postinstall.mjs` entry point, but operations split into clearly separated async functions. Each function handles one R9 sub-requirement.
+
+### Structure
+```
+scripts/postinstall.mjs       (~250 lines, well-structured)
+skills/
+  agile-spec-to-build/SKILL.md
+  structured-review/SKILL.md
+agents/
+  agents.json
+  TRACK_AGENTS.md
+```
+
+### Functions
+```javascript
+async function copyPlugin(configDir)         // R9.1
+async function installSkills(configDir)      // R9.2
+async function installAgents(configDir)      // R9.3
+async function registerPlugin(configDir)     // R9.4
+async function installAgentsMd(configDir)    // R9.5
+function isNonInteractive()                  // R9.6
+async function main()                        // orchestrator
+```
+
+### Trade-offs
+| Dimension        | Rating | Notes |
+|------------------|--------|-------|
+| Complexity       | Low    | Clear separation of concerns |
+| Maintainability  | High   | Each function is self-contained |
+| Testability      | Medium | Functions could be imported and tested |
+| Error isolation  | Best   | Each function has own try/catch |
+| Dependencies     | None   | Node.js built-ins only |
+
+---
+
+## Strategy C: TypeScript Script (compiled)
+
+### Approach
+Write the postinstall in TypeScript (`src/postinstall.ts`), compile it along with the main plugin. This gives type safety and access to shared types.
+
+### Trade-offs
+| Dimension        | Rating | Notes |
+|------------------|--------|-------|
+| Complexity       | Medium | Need to ensure tsc outputs to right location |
+| Maintainability  | High   | Type safety, shared types |
+| Testability      | High   | Can unit test with Jest |
+| Error isolation  | Good   | Same as B |
+| Dependencies     | None   | Still Node.js built-ins at runtime |
+| Build coupling   | Risk   | postinstall must work even if build partially fails |
+
+### Risk
+The postinstall script runs AFTER npm install but the script itself needs to be pre-built. If tsc fails, the postinstall won't exist. Since `"prepack": "npm run build"` runs before publishing, this should work for published packages. But for local development (`npm link`), the script might not be built yet.
+
+---
+
+## Edge Case Analysis
+
+### E1: opencode.json doesn't exist yet
+New user who just installed OpenCode but hasn't configured anything. The file may not exist at all. Must create with minimal valid structure:
+```json
+{
+  "plugin": ["~/.config/opencode/plugins/agent-tracker"]
+}
+```
+
+### E2: opencode.json has no agent or plugin key
+File exists but is minimal (e.g., only has model config). Must add agent and plugin keys without destroying existing content.
+
+### E3: opencode.json is malformed JSON
+User may have hand-edited the file with a syntax error. Options:
+- (a) Fail gracefully with a clear error message
+- (b) Try to fix common issues (trailing commas)
+Option (a) is safer -- don't risk corrupting the file further.
+
+### E4: Skills directory has extra files
+User might have custom files alongside SKILL.md. Since we skip-if-directory-exists, this is a non-issue.
+
+### E5: Plugin dist/ directory has different structure than expected
+The postinstall copies from the npm package's dist/, which is always the right version. No conflict possible.
+
+### E6: Permissions error on ~/.config/opencode/
+macOS/Linux permission issues. Must catch and report clearly.
+
+### E7: AGENTS.md merge detection
+How to detect which scoring sections already exist? Options:
+- (a) Look for specific heading markers (e.g., "## Agent Scoring System")
+- (b) Look for key phrases (e.g., "Skill Points (SP)")
+- (c) Check for a sentinel comment (e.g., "<!-- agent-tracker-scoring -->")
+Option (c) is most reliable -- headings/phrases could be coincidental. Use a sentinel comment.
+
+### E8: Plugin path format in opencode.json
+The current config uses `file:///path/to/dist` format. Should the postinstall use:
+- (a) Absolute path: `~/.config/opencode/plugins/agent-tracker`
+- (b) Relative path: `./plugins/agent-tracker`
+- (c) Plugin name only: `agent-tracker`
+Need to check what OpenCode supports. The current entries use file:// protocol, so (a) with file:// prefix is safest: `file:///home/user/.config/opencode/plugins/agent-tracker`
+
+### E9: npm global vs local install
+If installed globally (`npm i -g`), the postinstall still runs. The script should work regardless of where npm installs the package, since all paths are based on os.homedir().
+
+---
+
+## Recommendation
+
+**Strategy B: Modular Script with Helper Functions**
+
+### Why not A?
+Same work, worse organization. A monolithic script is harder to debug when one operation fails.
+
+### Why not C?
+TypeScript adds build coupling risk. The postinstall script is a simple filesystem operation -- it doesn't need type safety from the main project. It should be as independent as possible. If the TypeScript build breaks, the postinstall must still work. ESM JavaScript is simpler and eliminates this risk entirely.
+
+### Why B?
+1. **Independence**: The .mjs script has zero coupling to the TypeScript build pipeline
+2. **Debuggability**: Each function logs its own success/skip/error messages
+3. **Resilience**: Each operation is independent -- failure of one doesn't affect others
+4. **Simplicity**: ~250 lines of clean JavaScript, no build step needed
+5. **No dependencies**: Only uses fs, path, os from Node.js stdlib
+
+### Bundled assets to create
+1. Copy skills from ~/.config/opencode/skills/ into the repo at skills/
+2. Extract agent definitions from opencode.json into agents/agents.json
+3. Create agents/TRACK_AGENTS.md with the scoring system content
+4. Write scripts/postinstall.mjs
+5. Update package.json files array and postinstall script
+
+---
+
+**Architectural paths explored in BRAINSTORM.md. Use `architect-plan` to map the build.**
